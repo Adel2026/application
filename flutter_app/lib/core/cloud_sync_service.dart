@@ -383,7 +383,10 @@ class CloudSyncService {
         rank = sortedScores.indexOf(studentScore) + 1;
       }
 
-      final bool hasCertificate = percent >= 85.0 || (rank > 0 && rank <= 3 && percent >= 60.0);
+      final isRevoked = await _databaseService!.getSetting('cert_revoked_${sExamId}_$studentIdStr', defaultValue: 'false') == 'true' ||
+          await _databaseService!.getSetting('cert_revoked_all_$sExamId', defaultValue: 'false') == 'true';
+
+      final bool hasCertificate = !isRevoked && (percent >= 85.0 || (rank > 0 && rank <= 3 && percent >= 60.0));
 
       String certTitle = 'شهادة تفوق وامتياز 🎓';
       if (rank == 1) {
@@ -407,7 +410,7 @@ class CloudSyncService {
       final examTitleStr = (matchedExam['title'] ?? 'اختبار تقييمي').toString();
 
       // حفظ نتيجة الاختبار وترحيلها لحظياً لتطبيق الطالب (مع الحفاظ على أي صورة شهادة تم إصدارها سابقاً عبر SetOptions merge)
-      currentBatch.set(docRef, {
+      final scoreData = <String, dynamic>{
         'id': '${sExamId}_$studentIdStr',
         'exam_id': sExamId,
         'exam_title': examTitleStr,
@@ -428,7 +431,18 @@ class CloudSyncService {
         'certificate_title': hasCertificate ? certTitle : null,
         'notes': score['note'] ?? '',
         'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      };
+
+      if (isRevoked) {
+        scoreData['has_certificate'] = false;
+        scoreData['certificate_issued'] = false;
+        scoreData['certificate_deleted'] = true;
+        scoreData['certificate_revoked'] = true;
+        scoreData['certificate_image_base64'] = FieldValue.delete();
+        scoreData['certificate_title'] = FieldValue.delete();
+      }
+
+      currentBatch.set(docRef, scoreData, SetOptions(merge: true));
 
       batchCount++;
 
@@ -490,9 +504,15 @@ class CloudSyncService {
         'certificate_image_base64': base64Image,
         'certificate_title': certTitle,
         'certificate_issued': true,
+        'certificate_deleted': false,
+        'certificate_revoked': false,
         'certificate_issued_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      // مسح علامة الإلغاء إذا كانت موجودة
+      await _databaseService?.setSetting('cert_revoked_${examId}_$studentId', 'false');
+      await _databaseService?.setSetting('cert_revoked_all_$examId', 'false');
 
       // إرسال إشعار فوري ومميز للطالب بصدور شهادته المعتمدة
       final notifId = 'cert_${examId}_$studentId';
@@ -513,6 +533,111 @@ class CloudSyncService {
     } catch (e) {
       debugPrint('☁️ [CloudSync] Error publishing certificate image: $e');
       return false;
+    }
+  }
+
+  /// 🗑️ حذف وسحب شهادة الطالب من السحابة وتطبيق الطالب فوراً
+  Future<bool> revokeCertificate({
+    required String examId,
+    required String studentId,
+  }) async {
+    try {
+      final docId = '${examId}_$studentId';
+      final scoreDocRef = _academyRef.collection('exam_scores').doc(docId);
+
+      // 1. تحديث نتيجة الاختبار وحذف بيانات وصورة الشهادة
+      await scoreDocRef.set({
+        'has_certificate': false,
+        'certificate_issued': false,
+        'certificate_deleted': true,
+        'certificate_revoked': true,
+        'certificate_image_base64': FieldValue.delete(),
+        'certificate_title': FieldValue.delete(),
+        'certificate_revoked_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 2. حذف إشعار الشهادة من قائمة الإشعارات
+      final notifId = 'cert_${examId}_$studentId';
+      await _academyRef.collection('notifications').doc(notifId).delete();
+
+      // 3. حفظ علامة الإلغاء محلياً
+      await _databaseService?.setSetting('cert_revoked_${examId}_$studentId', 'true');
+
+      debugPrint('☁️ [CloudSync] Revoked certificate for student $studentId in exam $examId successfully.');
+      return true;
+    } catch (e) {
+      debugPrint('☁️ [CloudSync] Error revoking certificate: $e');
+      return false;
+    }
+  }
+
+  /// 🗑️ حذف وسحب جميع شهادات الاختبار من تطبيق الطالب دفعة واحدة
+  Future<bool> revokeAllCertificatesForExam({
+    required String examId,
+  }) async {
+    try {
+      final scoresSnap = await _academyRef
+          .collection('exam_scores')
+          .where('exam_id', isEqualTo: examId)
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in scoresSnap.docs) {
+        batch.set(doc.reference, {
+          'has_certificate': false,
+          'certificate_issued': false,
+          'certificate_deleted': true,
+          'certificate_revoked': true,
+          'certificate_image_base64': FieldValue.delete(),
+          'certificate_title': FieldValue.delete(),
+          'certificate_revoked_at': FieldValue.serverTimestamp(),
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        final studentId = doc.data()['student_id'];
+        if (studentId != null) {
+          final notifRef = _academyRef.collection('notifications').doc('cert_${examId}_$studentId');
+          batch.delete(notifRef);
+          await _databaseService?.setSetting('cert_revoked_${examId}_$studentId', 'true');
+        }
+      }
+
+      await _databaseService?.setSetting('cert_revoked_all_$examId', 'true');
+      await batch.commit();
+      debugPrint('☁️ [CloudSync] Revoked all certificates for exam $examId successfully.');
+      return true;
+    } catch (e) {
+      debugPrint('☁️ [CloudSync] Error revoking all certificates for exam $examId: $e');
+      return false;
+    }
+  }
+
+  /// 🗑️ حذف اختبار بالكامل من السحابة وتطبيق الطالب (بما فيه الدرجات والشهادات والإشعارات)
+  Future<void> deleteExamFromCloud(String examId) async {
+    try {
+      // 1. حذف وثيقة الاختبار
+      await _academyRef.collection('exams').doc(examId).delete();
+
+      // 2. جلب وحذف درجات وشهادات الاختبار
+      final scoresSnap = await _academyRef
+          .collection('exam_scores')
+          .where('exam_id', isEqualTo: examId)
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in scoresSnap.docs) {
+        batch.delete(doc.reference);
+        final studentId = doc.data()['student_id'];
+        if (studentId != null) {
+          batch.delete(_academyRef.collection('notifications').doc('score_${examId}_$studentId'));
+          batch.delete(_academyRef.collection('notifications').doc('cert_${examId}_$studentId'));
+        }
+      }
+      await batch.commit();
+      debugPrint('☁️ [CloudSync] Deleted exam $examId and all related scores/certificates from cloud.');
+    } catch (e) {
+      debugPrint('☁️ [CloudSync] Error deleting exam from cloud: $e');
     }
   }
 
@@ -576,7 +701,11 @@ class CloudSyncService {
         final docId = '${examId}_$studentId';
         final docRef = scoresCol.doc(docId);
 
-        batch.set(docRef, {
+        final isRevoked = await _databaseService!.getSetting('cert_revoked_${examId}_$studentId', defaultValue: 'false') == 'true' ||
+            await _databaseService!.getSetting('cert_revoked_all_$examId', defaultValue: 'false') == 'true';
+        final effHasCert = !isRevoked && hasCert;
+
+        final directScoreData = <String, dynamic>{
           'id': docId,
           'exam_id': examId,
           'exam_title': examTitle,
@@ -592,10 +721,21 @@ class CloudSyncService {
           'max_score': maxScore,
           'percentage': percent,
           'rank': rank,
-          'has_certificate': hasCert,
-          'certificate_title': hasCert ? certTitle : null,
+          'has_certificate': effHasCert,
+          'certificate_title': effHasCert ? certTitle : null,
           'updated_at': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        };
+
+        if (isRevoked) {
+          directScoreData['has_certificate'] = false;
+          directScoreData['certificate_issued'] = false;
+          directScoreData['certificate_deleted'] = true;
+          directScoreData['certificate_revoked'] = true;
+          directScoreData['certificate_image_base64'] = FieldValue.delete();
+          directScoreData['certificate_title'] = FieldValue.delete();
+        }
+
+        batch.set(docRef, directScoreData, SetOptions(merge: true));
 
         final notifId = 'score_${examId}_$studentId';
         batch.set(notifsCol.doc(notifId), {

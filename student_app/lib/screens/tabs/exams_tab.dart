@@ -81,11 +81,15 @@ class ExamsTab extends StatelessWidget {
               final rank = (exam['rank'] as num? ?? 0).toInt();
               final notes = exam['notes'] ?? '';
               final percentage = (exam['percentage'] as num? ?? (max > 0 ? ((score / max) * 100) : 0)).toDouble();
-              final hasCert = exam['has_certificate'] == true ||
+              final isCertRevoked = exam['certificate_deleted'] == true ||
+                  exam['certificate_revoked'] == true ||
+                  exam['has_certificate'] == false ||
+                  exam['certificate_issued'] == false;
+              final hasCert = !isCertRevoked && (
+                  exam['has_certificate'] == true ||
                   (exam['certificate_image_base64'] != null && exam['certificate_image_base64'].toString().isNotEmpty) ||
-                  exam['certificate_issued'] == true ||
-                  percentage >= 85.0 ||
-                  (rank > 0 && rank <= 3 && percentage >= 60.0);
+                  exam['certificate_issued'] == true
+              );
               final certTitle = exam['certificate_title'] ?? 'شهادة تقدير وتفوق 🎓';
 
               Color gradeColor = AppTheme.success;

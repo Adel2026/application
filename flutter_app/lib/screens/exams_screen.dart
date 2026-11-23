@@ -408,6 +408,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
                                     );
                                     if (confirm == true) {
                                       await widget.database.deleteExam(exam.id);
+                                      await CloudSyncService.instance.deleteExamFromCloud(exam.id);
                                       _loadExamsData();
                                     }
                                   },

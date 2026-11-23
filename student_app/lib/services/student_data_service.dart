@@ -104,36 +104,34 @@ class StudentDataService {
           // تحديد السجل الأحدث بناءً على تاريخ التحديث
           final sTime = '${s['updated_at'] ?? s['created_at'] ?? s['synced_at'] ?? s['date'] ?? ''}';
           final exTime = '${existing['updated_at'] ?? existing['created_at'] ?? existing['synced_at'] ?? existing['date'] ?? ''}';
-          final isCandidateNewer = sTime.compareTo(exTime) > 0;
+          final isCandidateNewer = sTime.compareTo(exTime) >= 0;
 
-          // دمج بيانات الشهادة حتى لا تضيع سواء كانت في السجل القديم أو الجديد
-          final existingImg = existing['certificate_image_base64'];
-          final candidateImg = s['certificate_image_base64'];
-          final bestImg = (candidateImg != null && candidateImg.toString().isNotEmpty)
-              ? candidateImg
-              : existingImg;
-
-          final bestCertIssued = s['certificate_issued'] == true || existing['certificate_issued'] == true;
-          final bestHasCert = s['has_certificate'] == true || existing['has_certificate'] == true || (bestImg != null && bestImg.toString().isNotEmpty);
-          final bestCertTitle = (s['certificate_title'] != null && s['certificate_title'].toString().isNotEmpty)
-              ? s['certificate_title']
-              : existing['certificate_title'];
+          final candidateRevoked = s['certificate_deleted'] == true ||
+              s['certificate_revoked'] == true ||
+              s['has_certificate'] == false ||
+              s['certificate_issued'] == false;
+          final existingRevoked = existing['certificate_deleted'] == true ||
+              existing['certificate_revoked'] == true ||
+              existing['has_certificate'] == false ||
+              existing['certificate_issued'] == false;
 
           if (isCandidateNewer) {
             uniqueByExam[eId] = Map<String, dynamic>.from(s);
-          }
-
-          if (bestImg != null && bestImg.toString().isNotEmpty) {
-            uniqueByExam[eId]!['certificate_image_base64'] = bestImg;
-          }
-          if (bestHasCert) {
-            uniqueByExam[eId]!['has_certificate'] = true;
-          }
-          if (bestCertIssued) {
-            uniqueByExam[eId]!['certificate_issued'] = true;
-          }
-          if (bestCertTitle != null) {
-            uniqueByExam[eId]!['certificate_title'] = bestCertTitle;
+            if (candidateRevoked) {
+              uniqueByExam[eId]!['has_certificate'] = false;
+              uniqueByExam[eId]!['certificate_issued'] = false;
+              uniqueByExam[eId]!['certificate_deleted'] = true;
+              uniqueByExam[eId]!['certificate_revoked'] = true;
+              uniqueByExam[eId]!['certificate_image_base64'] = null;
+            }
+          } else {
+            if (existingRevoked) {
+              uniqueByExam[eId]!['has_certificate'] = false;
+              uniqueByExam[eId]!['certificate_issued'] = false;
+              uniqueByExam[eId]!['certificate_deleted'] = true;
+              uniqueByExam[eId]!['certificate_revoked'] = true;
+              uniqueByExam[eId]!['certificate_image_base64'] = null;
+            }
           }
         }
       }
@@ -144,8 +142,13 @@ class StudentDataService {
         final score = (s['score'] as num? ?? 0).toDouble();
         final pct = (s['percentage'] as num?)?.toDouble() ?? (max > 0 ? (score / max) * 100 : 0.0);
         final rank = (s['rank'] as num? ?? 0).toInt();
-        final hasImg = s['certificate_image_base64'] != null && s['certificate_image_base64'].toString().isNotEmpty;
-        final hasCert = s['has_certificate'] == true || hasImg || s['certificate_issued'] == true || pct >= 85.0 || (rank > 0 && rank <= 3 && pct >= 60.0);
+        final bool isCertRevoked = s['certificate_deleted'] == true ||
+            s['certificate_revoked'] == true ||
+            s['has_certificate'] == false ||
+            s['certificate_issued'] == false;
+
+        final hasImg = !isCertRevoked && s['certificate_image_base64'] != null && s['certificate_image_base64'].toString().isNotEmpty;
+        final hasCert = !isCertRevoked && (s['has_certificate'] == true || hasImg || s['certificate_issued'] == true);
 
         String certTitle = s['certificate_title'] ?? 'شهادة تفوق وامتياز 🎓';
         if (rank == 1) {
@@ -164,7 +167,9 @@ class StudentDataService {
           'percentage': pct,
           'rank': rank,
           'has_certificate': hasCert,
-          'certificate_title': certTitle,
+          'certificate_issued': hasCert,
+          'certificate_image_base64': isCertRevoked ? null : s['certificate_image_base64'],
+          'certificate_title': hasCert ? certTitle : null,
           'exam_date': s['exam_date'] ?? s['date'] ?? '',
         });
       }

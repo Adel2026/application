@@ -82,8 +82,15 @@ class _StudentMainShellState extends State<StudentMainShell> {
 
       for (final exam in exams) {
         final examId = '${exam['exam_id'] ?? exam['id']}';
-        final hasCert = exam['has_certificate'] == true;
-        if (!hasCert) continue;
+        final isRevoked = exam['certificate_deleted'] == true ||
+            exam['certificate_revoked'] == true ||
+            exam['has_certificate'] == false ||
+            exam['certificate_issued'] == false;
+        final hasCert = !isRevoked && (exam['has_certificate'] == true);
+        if (!hasCert) {
+          _celebratedExamIds.add(examId);
+          continue;
+        }
 
         // التحقق من صلاحية ظهور الشهادة عند فتح التطبيق (تظهر لمدة يوم واحد فقط = 24 ساعة)
         final firstSeenKey = 'cert_first_seen_${studentId}_$examId';

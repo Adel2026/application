@@ -3094,6 +3094,211 @@ class _CertificatesScreenState extends State<CertificatesScreen> {
     }
   }
 
+  /// 🗑️ حذف وسحب شهادة الطالب المحددة من تطبيق الطالب
+  Future<void> _revokeCertificateFromStudentApp() async {
+    if (_effStudentName.trim().isEmpty) return;
+
+    String studentId = '';
+    if (_certMode == CertificateMode.examRankings && _studentsRanked.isNotEmpty && _selectedStudentIndex < _studentsRanked.length) {
+      studentId = _studentsRanked[_selectedStudentIndex].id;
+    } else if (_selectedStudent != null) {
+      studentId = _selectedStudent!.id;
+    } else if (_studentsRanked.isNotEmpty && _selectedStudentIndex < _studentsRanked.length) {
+      studentId = _studentsRanked[_selectedStudentIndex].id;
+    }
+
+    if (studentId.isEmpty) {
+      final allDbStudents = await widget.database.getStudents();
+      final matched = allDbStudents.where((s) => s.fullName.trim() == _effStudentName.trim()).firstOrNull;
+      if (matched != null) {
+        studentId = matched.id;
+      }
+    }
+
+    if (studentId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى تحديد الطالب أولاً لحذف شهادته'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    String examId = _selectedExam?.id ?? '';
+    if (examId.isEmpty && _exams.isNotEmpty) {
+      examId = _exams.first.id;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFEF4444), width: 1.5),
+        ),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_forever_rounded, color: Color(0xFFEF4444)),
+            const SizedBox(width: 8),
+            Text(
+              _isEnglish ? 'Revoke Certificate 🗑️' : 'حذف وإلغاء الشهادة 🗑️',
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Text(
+          _isEnglish
+              ? 'Are you sure you want to delete and revoke the certificate for "$_effStudentName" from the Student App?\n\nThe student will no longer see or celebrate this certificate.'
+              : 'هل ترغب بالتأكيد في حذف شهادة الطالب ($_effStudentName) وسحبها من تطبيق الطالب نهائياً؟\n\nستختفي الشهادة فوراً ولن يتمكن الطالب من رؤيتها أو تحميلها.',
+          style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 13.5, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_isEnglish ? 'Cancel' : 'إلغاء', style: const TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.delete_forever_rounded, size: 16),
+            onPressed: () => Navigator.pop(ctx, true),
+            label: Text(_isEnglish ? 'Yes, Revoke Now' : 'نعم، حذف الشهادة الآن 🗑️', style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isGenerating = true);
+    try {
+      final success = await CloudSyncService.instance.revokeCertificate(
+        examId: examId,
+        studentId: studentId,
+      );
+
+      await widget.database.setSetting('cert_revoked_${examId}_$studentId', 'true');
+      _sentCertStudentIds.remove(studentId);
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: const Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Colors.white, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _isEnglish
+                          ? 'Certificate for $_effStudentName revoked and deleted from Student App! 🗑️✓'
+                          : 'تم حذف شهادة الطالب ($_effStudentName) وسحبها من تطبيق الطالب بنجاح! 🗑️✓',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.redAccent,
+              content: Text('تعذر حذف الشهادة من السحابة، تأكد من الاتصال بالإنترنت'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error revoking certificate: $e');
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
+  }
+
+  /// 🗑️ حذف وسحب جميع شهادات هذا الاختبار من تطبيق الطالب
+  Future<void> _revokeAllCertificatesForExam() async {
+    if (_studentsRanked.isEmpty || _selectedExam == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('لا توجد شهادات متفوقين لحذفها في هذا الاختبار')),
+      );
+      return;
+    }
+
+    final examId = _selectedExam!.id;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFEF4444), width: 1.5),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.delete_sweep_rounded, color: Color(0xFFEF4444)),
+            SizedBox(width: 8),
+            Text('حذف جميع الشهادات 🗑️', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          'هل تريد بالتأكيد حذف وسحب كافة شهادات الطلاب المتفوقين (${_studentsRanked.length} طالب) في اختبار "${_selectedExam!.title}" من تطبيق الطالب نهائياً؟\n\nستختفي الشهادات من حسابات جميع الطلاب فوراً.',
+          style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 13.5, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+            onPressed: () => Navigator.pop(ctx, true),
+            label: const Text('حذف وسحب الكل 🗑️', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isGenerating = true);
+    try {
+      await CloudSyncService.instance.revokeAllCertificatesForExam(examId: examId);
+      await widget.database.setSetting('cert_revoked_all_$examId', 'true');
+      for (final s in _studentsRanked) {
+        await widget.database.setSetting('cert_revoked_${examId}_${s.id}', 'true');
+        _sentCertStudentIds.remove(s.id);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+            content: Text('تم حذف وسحب جميع شهادات الاختبار من تطبيق الطالب بنجاح! 🗑️✨'),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error revoking all certificates: $e');
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
+  }
+
   /// Capture Certificate widget as ultra-HD PNG image
   Future<File?> _captureCertificateFile(String studentName) async {
     try {
@@ -3316,6 +3521,11 @@ class _CertificatesScreenState extends State<CertificatesScreen> {
             icon: const Icon(Icons.cloud_upload_rounded, color: Color(0xFF00F2FE)),
             tooltip: _isEnglish ? 'Publish All Cohort Certificates' : 'إصدار ونشر شهادات جميع الأوائل لتطبيق الطالب 🚀',
             onPressed: _isGenerating ? null : _issueAllCertificatesToStudentApp,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_rounded, color: Color(0xFFEF4444)),
+            tooltip: _isEnglish ? 'Revoke All Exam Certificates' : 'حذف وسحب جميع شهادات الاختبار من تطبيق الطالب 🗑️',
+            onPressed: _isGenerating ? null : _revokeAllCertificatesForExam,
           ),
           IconButton(
             icon: const Icon(Icons.share_rounded, color: Color(0xFFFBBF24)),
@@ -3914,6 +4124,25 @@ class _CertificatesScreenState extends State<CertificatesScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                     ),
                     onPressed: _isGenerating ? null : () => _shareCertificateImage(directWhatsApp: false),
+                  ),
+                  const SizedBox(height: 8),
+
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 2,
+                    ),
+                    icon: _isGenerating
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.delete_forever_rounded, size: 20),
+                    label: Text(
+                      _isEnglish ? 'Revoke & Delete from Student App 🗑️' : 'حذف وإلغاء الشهادة من تطبيق الطالب 🗑️',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                    ),
+                    onPressed: _isGenerating ? null : () => _revokeCertificateFromStudentApp(),
                   ),
                 ],
               ),
