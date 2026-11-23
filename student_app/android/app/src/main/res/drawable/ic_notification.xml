@@ -1,0 +1,46 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Circular Ring -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:pathData="M 54,14 A 40,40 0 1,0 54,94 A 40,40 0 1,0 54,14 Z" />
+
+    <!-- Graduation Cap / Mortarboard Diamond Top -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,28 L 80,40 L 54,52 L 28,40 Z" />
+
+    <!-- Cap Skull Base -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 39,47 L 39,56 C 39,62 69,62 69,56 L 69,47 L 54,53 Z" />
+
+    <!-- Tassel String and Pendant -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:pathData="M 54,40 Q 33,43 31,56" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 29.5,56 L 33.5,56 L 32.5,65 L 30.5,65 Z" />
+
+    <!-- Open Book - Left Page -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 52,66 C 47,62 36,62 30,65 L 30,77 C 36,74 47,74 52,78 Z" />
+
+    <!-- Open Book - Right Page -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 56,66 C 61,62 72,62 78,65 L 78,77 C 72,74 61,74 56,78 Z" />
+
+    <!-- Excellence Accent Dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,82 A 2,2 0 1,0 54,86 A 2,2 0 1,0 54,82 Z" />
+</vector>

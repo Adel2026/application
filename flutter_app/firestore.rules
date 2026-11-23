@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Edu Academy Hub: Allow read and write for the academy apps
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

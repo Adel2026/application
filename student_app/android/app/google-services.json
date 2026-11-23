@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "811156396181",
+    "project_id": "edu-academy-hub",
+    "storage_bucket": "edu-academy-hub.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:811156396181:android:bf966709618880f311e39c",
+        "android_client_info": {
+          "package_name": "com.example.edu_academy_student"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBpi80cW_XpR7Jcx15zypKqn1qSdvFb3ws"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:811156396181:android:361696eeb9d55b1b11e39c",
+        "android_client_info": {
+          "package_name": "com.example.teacher_center"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBpi80cW_XpR7Jcx15zypKqn1qSdvFb3ws"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
