@@ -110,8 +110,12 @@ class DatabaseService {
         await db.rawQuery('PRAGMA journal_mode = WAL');
         await db.execute('PRAGMA synchronous = NORMAL');
         await db.execute('PRAGMA temp_store = MEMORY');
-        await db.execute('PRAGMA cache_size = -16000');
-        await db.execute('PRAGMA mmap_size = 30000000');
+        try {
+          await db.rawQuery('PRAGMA cache_size = -16000');
+        } catch (_) {}
+        try {
+          await db.rawQuery('PRAGMA mmap_size = 30000000');
+        } catch (_) {}
       },
       onOpen: (db) async {
         final versionRes = await db.rawQuery('PRAGMA user_version');
