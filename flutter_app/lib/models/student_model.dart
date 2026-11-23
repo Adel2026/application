@@ -1,5 +1,48 @@
 import 'dart:convert';
 
+/// جهة اتصال ولي الأمر وصلة القرابة (والد، والدة، أخ، عم، إلخ)
+class GuardianContact {
+  final String name;
+  final String phone;
+  final String relationship; // والد، والدة، أخ، عم، خال، ولي أمر، أخرى
+  final bool isPrimary;
+
+  const GuardianContact({
+    required this.name,
+    required this.phone,
+    this.relationship = 'والد',
+    this.isPrimary = false,
+  });
+
+  Map<String, dynamic> toMap() => {
+    'name': name.trim(),
+    'phone': phone.trim(),
+    'relationship': relationship.trim(),
+    'is_primary': isPrimary,
+  };
+
+  factory GuardianContact.fromMap(Map<String, dynamic> map) => GuardianContact(
+    name: (map['name'] ?? '').toString().trim(),
+    phone: (map['phone'] ?? '').toString().trim(),
+    relationship: (map['relationship'] ?? map['relation'] ?? 'ولي أمر').toString().trim(),
+    isPrimary: map['is_primary'] == true,
+  );
+
+  GuardianContact copyWith({
+    String? name,
+    String? phone,
+    String? relationship,
+    bool? isPrimary,
+  }) {
+    return GuardianContact(
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      relationship: relationship ?? this.relationship,
+      isPrimary: isPrimary ?? this.isPrimary,
+    );
+  }
+}
+
 class StudentModel {
   const StudentModel({
     required this.id,
@@ -13,6 +56,7 @@ class StudentModel {
     this.outstandingAmount = 0,
     this.parentName = '',
     this.isActive = true,
+    this.guardiansJson,
   });
 
   final String id;
@@ -26,6 +70,34 @@ class StudentModel {
   final double outstandingAmount;
   final String parentName;
   final bool isActive;
+  final String? guardiansJson;
+
+  /// قائمة جميع أولياء الأمور المسجلين للطالب مع صلة القرابة لكل منهم
+  List<GuardianContact> get guardians {
+    if (guardiansJson != null && guardiansJson!.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(guardiansJson!);
+        if (decoded is List) {
+          final list = decoded
+              .map((e) => GuardianContact.fromMap(Map<String, dynamic>.from(e as Map)))
+              .where((g) => g.phone.isNotEmpty || g.name.isNotEmpty)
+              .toList();
+          if (list.isNotEmpty) return list;
+        }
+      } catch (_) {}
+    }
+    if (parentPhone.trim().isNotEmpty || parentName.trim().isNotEmpty) {
+      return [
+        GuardianContact(
+          name: parentName.trim().isNotEmpty ? parentName.trim() : 'ولي الأمر',
+          phone: parentPhone.trim(),
+          relationship: 'والد',
+          isPrimary: true,
+        ),
+      ];
+    }
+    return [];
+  }
 
   bool get hasOutstandingPayment => outstandingAmount > 0;
 
@@ -46,6 +118,7 @@ class StudentModel {
     double? outstandingAmount,
     String? parentName,
     bool? isActive,
+    String? guardiansJson,
   }) {
     return StudentModel(
       id: id ?? this.id,
@@ -59,6 +132,7 @@ class StudentModel {
       outstandingAmount: outstandingAmount ?? this.outstandingAmount,
       parentName: parentName ?? this.parentName,
       isActive: isActive ?? this.isActive,
+      guardiansJson: guardiansJson ?? this.guardiansJson,
     );
   }
 
@@ -74,6 +148,7 @@ class StudentModel {
         'outstanding_amount': outstandingAmount,
         'parent_name': parentName,
         'is_active': isActive ? 1 : 0,
+        'guardians_json': guardiansJson,
       };
 
   factory StudentModel.fromMap(Map<String, Object?> map) => StudentModel(
@@ -88,5 +163,6 @@ class StudentModel {
         outstandingAmount: (map['outstanding_amount'] as num?)?.toDouble() ?? 0,
         parentName: (map['parent_name'] as String?) ?? '',
         isActive: (map['is_active'] as num?)?.toInt() != 0,
+        guardiansJson: map['guardians_json'] as String?,
       );
 }

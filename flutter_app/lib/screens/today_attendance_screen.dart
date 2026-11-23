@@ -7066,6 +7066,8 @@ class _GroupSessionReportSheetState extends State<GroupSessionReportSheet> {
       grade: effGrade,
       studentPhone: sPhone,
       parentPhone: pPhone,
+      parentName: s['parent_name']?.toString() ?? '',
+      guardiansJson: s['guardians_json']?.toString(),
       groupId: widget.group.id,
       paymentPlan: s['payment_plan']?.toString() ?? widget.group.billingType,
     );
@@ -7224,6 +7226,8 @@ class _GroupSessionReportSheetState extends State<GroupSessionReportSheet> {
       grade: effGrade,
       studentPhone: sPhone,
       parentPhone: pPhone,
+      parentName: student['parent_name']?.toString() ?? '',
+      guardiansJson: student['guardians_json']?.toString(),
       groupId: widget.group.id,
       paymentPlan: student['payment_plan']?.toString() ?? widget.group.billingType,
     );

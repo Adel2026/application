@@ -747,6 +747,9 @@ class DatabaseService {
           await db.execute('ALTER TABLE students ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
         } catch (_) {}
         try {
+          await db.execute('ALTER TABLE students ADD COLUMN guardians_json TEXT');
+        } catch (_) {}
+        try {
           await db.execute('ALTER TABLE groups ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
         } catch (_) {}
 

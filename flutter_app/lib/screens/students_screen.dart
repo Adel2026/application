@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +20,35 @@ import '../models/student_model.dart';
 import '../widgets/section_top_bar.dart';
 import 'reports_screen.dart';
 import 'teacher_student_app_control_screen.dart';
+
+class _GuardianEditorItem {
+  final TextEditingController nameCtrl;
+  final TextEditingController phoneCtrl;
+  String relationship;
+  bool isPrimary;
+
+  _GuardianEditorItem({
+    required String name,
+    required String phone,
+    this.relationship = 'والد',
+    this.isPrimary = false,
+  })  : nameCtrl = TextEditingController(text: name),
+        phoneCtrl = TextEditingController(text: phone);
+
+  void dispose() {
+    nameCtrl.dispose();
+    phoneCtrl.dispose();
+  }
+
+  GuardianContact toContact() {
+    return GuardianContact(
+      name: nameCtrl.text.trim(),
+      phone: phoneCtrl.text.trim(),
+      relationship: relationship.trim().isNotEmpty ? relationship.trim() : 'ولي أمر',
+      isPrimary: isPrimary,
+    );
+  }
+}
 
 class StudentsScreen extends StatefulWidget {
   const StudentsScreen({super.key, required this.database, this.onBack});
@@ -166,7 +196,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
       if (query.isNotEmpty) {
         final nameMatch = s.fullName.toLowerCase().contains(query);
         final codeMatch = s.id.toLowerCase().contains(query);
-        final phoneMatch = s.studentPhone.contains(query) || s.parentPhone.contains(query);
+        final phoneMatch = s.studentPhone.contains(query) ||
+            s.parentPhone.contains(query) ||
+            s.guardians.any((g) => g.phone.contains(query) || g.name.toLowerCase().contains(query));
         final parentNameMatch = s.parentName.toLowerCase().contains(query);
         final gradeMatch = s.grade.toLowerCase().contains(query) || s.stage.toLowerCase().contains(query);
 
@@ -203,12 +235,29 @@ class _StudentsScreenState extends State<StudentsScreen> {
     final studentPhoneCtrl = TextEditingController(
       text: existingStudent?.studentPhone ?? '',
     );
-    final parentNameCtrl = TextEditingController(
-      text: existingStudent?.parentName ?? '',
-    );
-    final parentPhoneCtrl = TextEditingController(
-      text: existingStudent?.parentPhone ?? '',
-    );
+    final List<_GuardianEditorItem> guardianItems = [];
+    if (existingStudent != null && existingStudent.guardians.isNotEmpty) {
+      for (int i = 0; i < existingStudent.guardians.length; i++) {
+        final g = existingStudent.guardians[i];
+        guardianItems.add(
+          _GuardianEditorItem(
+            name: g.name,
+            phone: g.phone,
+            relationship: g.relationship.isNotEmpty ? g.relationship : 'والد',
+            isPrimary: g.isPrimary || (i == 0 && !existingStudent.guardians.any((x) => x.isPrimary)),
+          ),
+        );
+      }
+    } else {
+      guardianItems.add(
+        _GuardianEditorItem(
+          name: existingStudent?.parentName ?? '',
+          phone: existingStudent?.parentPhone ?? '',
+          relationship: 'والد',
+          isPrimary: true,
+        ),
+      );
+    }
 
     // Grade options matching curriculum system
     final List<String> allGrades = [
@@ -703,153 +752,120 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 ),
                                 const SizedBox(height: 14),
 
-                                // 3. اسم ولي الأمر
-                                const Text(
-                                  'اسم ولي الأمر',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFFCBD5E1),
+                                // 3 & 4. أولياء الأمور والمتابعة (دعم أكثر من ولي أمر وصلة القرابة)
+                                Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 4),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0F172A),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFF1E293B)),
                                   ),
-                                ),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: parentNameCtrl,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13.5,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.family_restroom_rounded,
+                                            color: Color(0xFF10B981),
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Text(
+                                            'أولياء الأمور والمتابعة',
+                                            style: TextStyle(
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFFCBD5E1),
+                                            ),
+                                          ),
+                                          const Spacer(),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                                            ),
+                                            child: Text(
+                                              '${guardianItems.length} مسجل',
+                                              style: const TextStyle(
+                                                color: Color(0xFF10B981),
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      for (int i = 0; i < guardianItems.length; i++) ...[
+                                        _buildGuardianEditorCard(
+                                          index: i,
+                                          item: guardianItems[i],
+                                          canDelete: guardianItems.length > 1,
+                                          onDelete: () {
+                                            setModalState(() {
+                                              final removed = guardianItems.removeAt(i);
+                                              removed.dispose();
+                                              if (!guardianItems.any((g) => g.isPrimary) && guardianItems.isNotEmpty) {
+                                                guardianItems.first.isPrimary = true;
+                                              }
+                                            });
+                                          },
+                                          onMakePrimary: () {
+                                            setModalState(() {
+                                              for (final g in guardianItems) {
+                                                g.isPrimary = false;
+                                              }
+                                              guardianItems[i].isPrimary = true;
+                                            });
+                                          },
+                                          onKinshipChanged: (newKinship) {
+                                            setModalState(() {
+                                              guardianItems[i].relationship = newKinship;
+                                            });
+                                          },
+                                        ),
+                                        if (i < guardianItems.length - 1) const SizedBox(height: 10),
+                                      ],
+                                      const SizedBox(height: 10),
+                                      OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: const Color(0xFF10B981),
+                                          side: const BorderSide(color: Color(0xFF10B981), width: 1.2),
+                                          padding: const EdgeInsets.symmetric(vertical: 9),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                        ),
+                                        icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                                        label: const Text(
+                                          '+ إضافة ولي أمر آخر (مثل الأم، الأب، الأخ...)',
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                                        ),
+                                        onPressed: () {
+                                          HapticFeedback.lightImpact();
+                                          setModalState(() {
+                                            String defaultRel = 'والدة';
+                                            if (guardianItems.any((g) => g.relationship == 'والدة')) {
+                                              defaultRel = 'ولي أمر';
+                                            }
+                                            guardianItems.add(
+                                              _GuardianEditorItem(
+                                                name: '',
+                                                phone: '',
+                                                relationship: defaultRel,
+                                                isPrimary: false,
+                                              ),
+                                            );
+                                          });
+                                        },
+                                      ),
+                                    ],
                                   ),
-                                  decoration: InputDecoration(
-                                    hintText: 'مثال: أحمد الشناوي',
-                                    hintStyle: const TextStyle(
-                                      color: Color(0xFF64748B),
-                                      fontSize: 13,
-                                    ),
-                                    filled: true,
-                                    fillColor: const Color(0xFF0E1522),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 12,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: const BorderSide(
-                                        color: Color(0xFF223046),
-                                      ),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: const BorderSide(
-                                        color: Color(0xFF223046),
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: const BorderSide(
-                                        color: Color(0xFF10B981),
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 14),
-
-                                // 4. هاتف ولي الأمر *
-                                Row(
-                                  children: const [
-                                    Text(
-                                      'هاتف ولي الأمر',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFFCBD5E1),
-                                      ),
-                                    ),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      '*',
-                                      style: TextStyle(
-                                        color: Color(0xFFEF4444),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: parentPhoneCtrl,
-                                  keyboardType: TextInputType.phone,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13.5,
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: '01XXXXXXXXX',
-                                    hintStyle: const TextStyle(
-                                      color: Color(0xFF64748B),
-                                      fontSize: 13,
-                                    ),
-                                    prefixIcon: const Icon(
-                                      Icons.contact_phone_rounded,
-                                      color: Color(0xFF64748B),
-                                      size: 18,
-                                    ),
-                                    suffixIcon: IconButton(
-                                      icon: const Icon(
-                                        Icons.contacts_rounded,
-                                        color: Color(0xFF10B981),
-                                        size: 20,
-                                      ),
-                                      tooltip: 'اختيار من دليل الهاتف',
-                                      onPressed: () async {
-                                        HapticFeedback.lightImpact();
-                                        final contact =
-                                            await ContactPickerService.pickContact();
-                                        if (contact != null &&
-                                            contact.phone.isNotEmpty) {
-                                          parentPhoneCtrl.text = contact.phone;
-                                          if (parentNameCtrl.text
-                                                  .trim()
-                                                  .isEmpty &&
-                                              contact.name.isNotEmpty) {
-                                            parentNameCtrl.text = contact.name;
-                                          }
-                                        }
-                                      },
-                                    ),
-                                    filled: true,
-                                    fillColor: const Color(0xFF0E1522),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 12,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: const BorderSide(
-                                        color: Color(0xFF223046),
-                                      ),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: const BorderSide(
-                                        color: Color(0xFF223046),
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: const BorderSide(
-                                        color: Color(0xFF10B981),
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                  ),
-                                  validator: (v) =>
-                                      v == null || v.trim().isEmpty
-                                      ? 'برجاء كتابة هاتف ولي الأمر للمتابعة'
-                                      : null,
-                                ),
-                                const SizedBox(height: 14),
+                                ),                                const SizedBox(height: 14),
 
                                 // 5. المجموعة الدراسية *
                                 Row(
@@ -1194,19 +1210,44 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                     } catch (_) {}
                                   }
 
+                                  final validGuardians = guardianItems
+                                      .map((item) => item.toContact())
+                                      .where((g) => g.phone.isNotEmpty)
+                                      .toList();
+                                  if (validGuardians.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('برجاء كتابة هاتف ولي أمر واحد على الأقل للمتابعة ⚠️'),
+                                        backgroundColor: Colors.redAccent,
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  if (!validGuardians.any((g) => g.isPrimary)) {
+                                    validGuardians[0] = validGuardians[0].copyWith(isPrimary: true);
+                                  }
+                                  final primaryGuardian = validGuardians.firstWhere(
+                                    (g) => g.isPrimary,
+                                    orElse: () => validGuardians.first,
+                                  );
+                                  final guardiansJsonStr = jsonEncode(
+                                    validGuardians.map((g) => g.toMap()).toList(),
+                                  );
+
                                   final student = StudentModel(
                                     id: studentId,
                                     fullName: nameCtrl.text.trim(),
                                     stage: stage,
                                     grade: selectedGrade,
                                     studentPhone: studentPhoneCtrl.text.trim(),
-                                    parentPhone: parentPhoneCtrl.text.trim(),
+                                    parentPhone: primaryGuardian.phone,
                                     groupId: assignedGroupId,
                                     paymentPlan:
                                         existingStudent?.paymentPlan ?? 'شهري',
                                     outstandingAmount:
                                         existingStudent?.outstandingAmount ?? 0,
-                                    parentName: parentNameCtrl.text.trim(),
+                                    parentName: primaryGuardian.name,
+                                    guardiansJson: guardiansJsonStr,
                                     isActive: isActive,
                                   );
 
@@ -1255,6 +1296,170 @@ class _StudentsScreenState extends State<StudentsScreen> {
     );
   }
 
+
+  Widget _buildGuardianEditorCard({
+    required int index,
+    required _GuardianEditorItem item,
+    required bool canDelete,
+    required VoidCallback onDelete,
+    required VoidCallback onMakePrimary,
+    required ValueChanged<String> onKinshipChanged,
+  }) {
+    final kinshipOptions = ['والد', 'والدة', 'أخ أكبر', 'أخت', 'عم', 'خال', 'ولي أمر'];
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1522),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: item.isPrimary ? const Color(0xFF10B981) : const Color(0xFF223046),
+          width: item.isPrimary ? 1.5 : 1.0,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              InkWell(
+                onTap: onMakePrimary,
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: item.isPrimary
+                        ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: item.isPrimary ? const Color(0xFF10B981) : const Color(0xFF475569),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        item.isPrimary ? Icons.star_rounded : Icons.star_border_rounded,
+                        color: item.isPrimary ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                        size: 15,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        item.isPrimary ? 'الأساسي ⭐' : 'تعيين كأساسي',
+                        style: TextStyle(
+                          color: item.isPrimary ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'ولي الأمر #${index + 1} (${item.relationship})',
+                  style: const TextStyle(
+                    color: Color(0xFFCBD5E1),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (canDelete)
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 18),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'حذف ولي الأمر',
+                  onPressed: onDelete,
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: kinshipOptions.map((rel) {
+                final isSelected = item.relationship == rel;
+                return Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: ChoiceChip(
+                    label: Text(
+                      rel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+                      ),
+                    ),
+                    selected: isSelected,
+                    selectedColor: const Color(0xFF10B981),
+                    backgroundColor: const Color(0xFF1E293B),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (val) {
+                      if (val) onKinshipChanged(rel);
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextFormField(
+            controller: item.nameCtrl,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'اسم ولي الأمر (مثال: ${item.relationship == "والدة" ? "أم أحمد" : "أحمد الشناوي"})',
+              hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+              filled: true,
+              fillColor: const Color(0xFF151E2E),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF223046))),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF223046))),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF10B981))),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextFormField(
+            controller: item.phoneCtrl,
+            keyboardType: TextInputType.phone,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'رقم هاتف ${item.relationship} (واتساب)',
+              hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+              prefixIcon: const Icon(Icons.phone_rounded, color: Color(0xFF64748B), size: 16),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.contacts_rounded, color: Color(0xFF10B981), size: 18),
+                tooltip: 'اختيار من دليل الهاتف',
+                onPressed: () async {
+                  HapticFeedback.lightImpact();
+                  final contact = await ContactPickerService.pickContact();
+                  if (contact != null && contact.phone.isNotEmpty) {
+                    item.phoneCtrl.text = contact.phone;
+                    if (item.nameCtrl.text.trim().isEmpty && contact.name.isNotEmpty) {
+                      item.nameCtrl.text = contact.name;
+                    }
+                  }
+                },
+              ),
+              filled: true,
+              fillColor: const Color(0xFF151E2E),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF223046))),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF223046))),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF10B981))),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showStudentDetail(StudentModel student) async {
     final shouldEdit = await showModalBottomSheet<bool>(
@@ -3667,6 +3872,7 @@ class _StudentDetailSheetState extends State<_StudentDetailSheet>
       studentName: widget.student.fullName,
       studentCode: widget.student.id,
       parentPhone: widget.student.parentPhone,
+      guardians: widget.student.guardians,
       reportTitle: 'تقرير متابعة شامل',
       reportMessage: msg.toString(),
       notifType: 'general',
@@ -3952,28 +4158,116 @@ class _StudentDetailSheetState extends State<_StudentDetailSheet>
             onPressed: _sendComprehensiveReport,
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.call, color: Colors.blue),
-                  label: const Text('اتصال ولي الأمر'),
-                  onPressed: () =>
-                      WhatsAppService.makeCall(widget.student.parentPhone),
-                ),
+          // Guardian Contacts Section
+          if (widget.student.guardians.length > 1) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(width: 8),
-              if (widget.student.studentPhone.isNotEmpty)
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.people_alt_rounded, size: 16, color: Color(0xFF10B981)),
+                      const SizedBox(width: 6),
+                      Text(
+                        'جهات اتصال أولياء الأمور (${widget.student.guardians.length})',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white70 : const Color(0xFF334155),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ...widget.student.guardians.map((g) {
+                    final title = g.name.isNotEmpty
+                        ? '${g.relationship}: ${g.name}'
+                        : '${g.relationship}: ${g.phone}';
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          if (g.isPrimary) ...[
+                            const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
+                            const SizedBox(width: 4),
+                          ],
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.call, size: 18, color: Colors.blue),
+                            tooltip: 'اتصال هاتفياً',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => WhatsAppService.makeCall(g.phone),
+                          ),
+                          const SizedBox(width: 10),
+                          IconButton(
+                            icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18, color: Color(0xFF10B981)),
+                            tooltip: 'مراسلة عبر واتساب',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => WhatsAppService.openWhatsApp(
+                              phone: g.phone,
+                              message: 'السلام عليكم ورحمة الله وبركاته، تحياتنا لحضرتك بخصوص الطالب ${widget.student.fullName}',
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (widget.student.studentPhone.isNotEmpty)
+              OutlinedButton.icon(
+                icon: const Icon(Icons.phone_android, color: Colors.teal),
+                label: const Text('اتصال بالطالب'),
+                onPressed: () => WhatsAppService.makeCall(widget.student.studentPhone),
+              ),
+          ] else ...[
+            Row(
+              children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.phone_android, color: Colors.teal),
-                    label: const Text('اتصال بالطالب'),
+                    icon: const Icon(Icons.call, color: Colors.blue),
+                    label: Text(
+                      widget.student.guardians.isNotEmpty
+                          ? 'اتصال بـ ${widget.student.guardians.first.relationship}'
+                          : 'اتصال ولي الأمر',
+                    ),
                     onPressed: () =>
-                        WhatsAppService.makeCall(widget.student.studentPhone),
+                        WhatsAppService.makeCall(widget.student.parentPhone),
                   ),
                 ),
-            ],
-          ),
+                const SizedBox(width: 8),
+                if (widget.student.studentPhone.isNotEmpty)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.phone_android, color: Colors.teal),
+                      label: const Text('اتصال بالطالب'),
+                      onPressed: () =>
+                          WhatsAppService.makeCall(widget.student.studentPhone),
+                    ),
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           // Active / Inactive Status Switcher
           OutlinedButton.icon(

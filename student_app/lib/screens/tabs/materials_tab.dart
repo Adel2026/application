@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../services/student_auth_service.dart';
 import '../../services/student_data_service.dart';
 import '../../theme/app_theme.dart';
@@ -100,6 +101,26 @@ class _MaterialsTabState extends State<MaterialsTab> {
     ).then((_) {
       _checkCachedFiles();
     });
+  }
+
+  Future<void> _openExternal(String fileUrl) async {
+    if (fileUrl.trim().isEmpty) return;
+    HapticFeedback.lightImpact();
+    try {
+      final uri = Uri.parse(fileUrl.trim());
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تعذر الفتح خارجياً: $e', style: const TextStyle(fontFamily: 'Cairo')),
+            backgroundColor: AppTheme.danger,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -432,24 +453,44 @@ class _MaterialsTabState extends State<MaterialsTab> {
                         ),
                       ],
                     ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00F2FE),
-                        foregroundColor: const Color(0xFF080C14),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        elevation: 0,
-                      ),
-                      icon: const Icon(Icons.menu_book_rounded, size: 16),
-                      label: const Text(
-                        'قراءة المذكرة 📖',
-                        style: TextStyle(
-                          fontFamily: 'Cairo',
-                          fontWeight: FontWeight.w900,
-                          fontSize: 12,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF00F2FE),
+                            side: const BorderSide(color: Color(0xFF00F2FE)),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: const Icon(Icons.open_in_new_rounded, size: 14),
+                          label: const Text(
+                            'خارجي ⚡',
+                            style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 11),
+                          ),
+                          onPressed: () => _openExternal(material['file_url'] ?? ''),
                         ),
-                      ),
-                      onPressed: () => _openPdfViewer(material),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00F2FE),
+                            foregroundColor: const Color(0xFF080C14),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            elevation: 0,
+                          ),
+                          icon: const Icon(Icons.menu_book_rounded, size: 15),
+                          label: const Text(
+                            'قراءة 📖',
+                            style: TextStyle(
+                              fontFamily: 'Cairo',
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12,
+                            ),
+                          ),
+                          onPressed: () => _openPdfViewer(material),
+                        ),
+                      ],
                     ),
                   ],
                 ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/student_model.dart';
 import 'academy_communication_service.dart';
 import 'database/database_service.dart';
 import 'whatsapp_service.dart';
@@ -217,6 +218,180 @@ class ReportDispatchHelper {
   }
 
   /// إرسال التقرير حسب القناة المختارة مع المعالجة التلقائية الكاملة
+  /// تخصيص ديباجة التقرير لصلة قرابة ولي الأمر (والد، والدة، أخ، إلخ)
+  static String personalizeReportForGuardian(String message, GuardianContact guardian, String studentName) {
+    final rel = guardian.relationship.trim();
+    if (rel.isEmpty || rel == 'ولي أمر') return message;
+
+    String salutation = '';
+    if (rel == 'والد') {
+      salutation = 'السيد الفاضل (والد الطالب: $studentName)';
+    } else if (rel == 'والدة') {
+      salutation = 'السيدة الفاضلة (والدة الطالب: $studentName)';
+    } else if (rel.contains('أخ')) {
+      salutation = 'الأخ الفاضل (أخو الطالب: $studentName)';
+    } else if (rel.contains('أخت')) {
+      salutation = 'الأخت الفاضلة (أخت الطالب: $studentName)';
+    } else {
+      salutation = 'السيد الفاضل ($rel الطالب: $studentName)';
+    }
+
+    if (guardian.name.isNotEmpty) {
+      salutation = '$salutation / ${guardian.name}';
+    }
+
+    if (message.contains('ولي أمر الطالب المحترم')) {
+      return message.replaceFirst('ولي أمر الطالب المحترم', salutation);
+    }
+
+    if (message.contains('السلام عليكم ورحمة الله وبركاته 🌸')) {
+      return message.replaceFirst(
+        'السلام عليكم ورحمة الله وبركاته 🌸',
+        'السلام عليكم ورحمة الله وبركاته 🌸\n$salutation',
+      );
+    }
+
+    if (message.contains('السلام عليكم ورحمة الله وبركاته')) {
+      return message.replaceFirst(
+        'السلام عليكم ورحمة الله وبركاته',
+        'السلام عليكم ورحمة الله وبركاته\n$salutation',
+      );
+    }
+
+    return '$salutation\n$message';
+  }
+
+  /// نافذة اختيار ولي الأمر عند وجود أكثر من ولي أمر للطالب
+  static Future<List<GuardianContact>?> showGuardianPickerSheet({
+    required BuildContext context,
+    required List<GuardianContact> guardians,
+    required String studentName,
+  }) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final selected = Set<int>.from(List.generate(guardians.length, (i) => i));
+
+    return showModalBottomSheet<List<GuardianContact>>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        const Icon(Icons.family_restroom_rounded, color: Color(0xFF25D366), size: 24),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('إرسال التقرير لأولياء الأمور 📲', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                              Text('اختر من ترغب بإرسال التقرير إليه للطالب: $studentName', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ...List.generate(guardians.length, (i) {
+                      final g = guardians[i];
+                      final isChecked = selected.contains(i);
+                      final relLabel = g.relationship.isNotEmpty ? g.relationship : 'ولي أمر';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: isChecked ? const Color(0xFF25D366).withValues(alpha: 0.12) : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isChecked ? const Color(0xFF25D366) : Colors.transparent),
+                        ),
+                        child: CheckboxListTile(
+                          activeColor: const Color(0xFF25D366),
+                          value: isChecked,
+                          onChanged: (val) {
+                            setModalState(() {
+                              if (val == true) {
+                                selected.add(i);
+                              } else {
+                                if (selected.length > 1) selected.remove(i);
+                              }
+                            });
+                          },
+                          title: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF25D366).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  relLabel,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF25D366)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  g.name.isNotEmpty ? g.name : relLabel,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (g.isPrimary)
+                                const Text('⭐ رئيسي', style: TextStyle(fontSize: 10, color: Colors.amber)),
+                            ],
+                          ),
+                          subtitle: Text(g.phone, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.send_rounded, size: 18),
+                        label: Text('متابعة وإرسال للمحددين (${selected.length}) 🚀', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          final list = selected.map((i) => guardians[i]).toList();
+                          Navigator.pop(ctx, list);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   static Future<ReportDispatchChannel?> dispatchReport({
     required BuildContext context,
     required String studentId,
@@ -227,6 +402,7 @@ class ReportDispatchHelper {
     required String reportMessage,
     String notifType = 'general',
     DatabaseService? database,
+    List<GuardianContact>? guardians,
   }) async {
     final channel = await showChannelPicker(
       context: context,
@@ -265,30 +441,48 @@ class ReportDispatchHelper {
       }
     }
 
-    // 2. الإرسال إلى واتساب
+    // 2. الإرسال إلى واتساب لأولياء الأمور
     if (channel == ReportDispatchChannel.whatsappOnly || channel == ReportDispatchChannel.both) {
-      if (parentPhone.trim().isNotEmpty) {
-        WhatsAppService.openWhatsApp(
-          phone: parentPhone,
-          message: reportMessage,
-        );
-      }
-    }
+      final targetGuardians = (guardians != null && guardians.isNotEmpty)
+          ? guardians
+          : [GuardianContact(name: '', phone: parentPhone, relationship: 'ولي أمر', isPrimary: true)];
 
-    // 3. تسجيل في قاعدة البيانات إن وُجدت
-    if (database != null) {
-      try {
-        await database.logWhatsAppMessage(
-          studentId: studentId,
+      List<GuardianContact> selectedGuardians = targetGuardians;
+      if (targetGuardians.length > 1 && context.mounted) {
+        final chosen = await showGuardianPickerSheet(
+          context: context,
+          guardians: targetGuardians,
           studentName: studentName,
-          phone: parentPhone,
-          recipientType: 'parent',
-          category: notifType,
-          message: reportMessage,
-          status: 'sent',
         );
-      } catch (e) {
-        debugPrint('Error logging message: $e');
+        if (chosen != null && chosen.isNotEmpty) {
+          selectedGuardians = chosen;
+        }
+      }
+
+      for (final g in selectedGuardians) {
+        if (g.phone.trim().isNotEmpty) {
+          final personalized = personalizeReportForGuardian(reportMessage, g, studentName);
+          WhatsAppService.openWhatsApp(
+            phone: g.phone,
+            message: personalized,
+          );
+
+          if (database != null) {
+            try {
+              await database.logWhatsAppMessage(
+                studentId: studentId,
+                studentName: studentName,
+                phone: g.phone,
+                recipientType: 'parent',
+                category: notifType,
+                message: personalized,
+                status: 'sent',
+              );
+            } catch (e) {
+              debugPrint('Error logging message: $e');
+            }
+          }
+        }
       }
     }
 

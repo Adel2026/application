@@ -186,6 +186,7 @@ class CloudSyncService {
         'is_active': row['is_active'] ?? 1,
         'outstanding_amount': row['outstanding_amount'] ?? 0.0,
         'parent_name': row['parent_name'] ?? '',
+        'guardians_json': row['guardians_json'] ?? '',
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     }

@@ -1354,22 +1354,44 @@ class _WhatsAppHubScreenState extends State<WhatsAppHubScreen> {
 
     final targets = <({String phone, String type, String label})>[];
     if (_recipientTarget == WhatsAppRecipientTarget.parent) {
-      if (parentPhone.length >= 7) {
+      if (student.guardians.isNotEmpty) {
+        for (final g in student.guardians) {
+          final fmt = WhatsAppService.formatPhone(g.phone);
+          if (fmt.length >= 7) {
+            targets.add((phone: fmt, type: 'parent', label: '${g.relationship}${g.name.isNotEmpty ? ' (${g.name})' : ''}'));
+          }
+        }
+      } else if (parentPhone.length >= 7) {
         targets.add((phone: parentPhone, type: 'parent', label: 'ولي الأمر'));
-      } else if (studentPhone.length >= 7) {
+      }
+      if (targets.isEmpty && studentPhone.length >= 7) {
         targets.add((phone: studentPhone, type: 'student', label: 'الطالب (لعدم توفر هاتف ولي الأمر)'));
       }
     } else if (_recipientTarget == WhatsAppRecipientTarget.student) {
       if (studentPhone.length >= 7) {
         targets.add((phone: studentPhone, type: 'student', label: 'الطالب'));
+      } else if (student.guardians.isNotEmpty) {
+        for (final g in student.guardians) {
+          final fmt = WhatsAppService.formatPhone(g.phone);
+          if (fmt.length >= 7) {
+            targets.add((phone: fmt, type: 'parent', label: '${g.relationship} (لعدم توفر هاتف الطالب)'));
+          }
+        }
       } else if (parentPhone.length >= 7) {
         targets.add((phone: parentPhone, type: 'parent', label: 'ولي الأمر (لعدم توفر هاتف الطالب)'));
       }
     } else {
-      if (parentPhone.length >= 7) {
+      if (student.guardians.isNotEmpty) {
+        for (final g in student.guardians) {
+          final fmt = WhatsAppService.formatPhone(g.phone);
+          if (fmt.length >= 7) {
+            targets.add((phone: fmt, type: 'parent', label: '${g.relationship}${g.name.isNotEmpty ? ' (${g.name})' : ''}'));
+          }
+        }
+      } else if (parentPhone.length >= 7) {
         targets.add((phone: parentPhone, type: 'parent', label: 'ولي الأمر'));
       }
-      if (studentPhone.length >= 7 && studentPhone != parentPhone) {
+      if (studentPhone.length >= 7 && !targets.any((t) => t.phone == studentPhone)) {
         targets.add((phone: studentPhone, type: 'student', label: 'الطالب'));
       }
     }
