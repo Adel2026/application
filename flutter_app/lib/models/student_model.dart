@@ -57,6 +57,8 @@ class StudentModel {
     this.parentName = '',
     this.isActive = true,
     this.guardiansJson,
+    this.studentPin,
+    this.parentPin,
   });
 
   final String id;
@@ -71,6 +73,8 @@ class StudentModel {
   final String parentName;
   final bool isActive;
   final String? guardiansJson;
+  final String? studentPin;
+  final String? parentPin;
 
   /// قائمة جميع أولياء الأمور المسجلين للطالب مع صلة القرابة لكل منهم
   List<GuardianContact> get guardians {
@@ -119,6 +123,8 @@ class StudentModel {
     String? parentName,
     bool? isActive,
     String? guardiansJson,
+    String? studentPin,
+    String? parentPin,
   }) {
     return StudentModel(
       id: id ?? this.id,
@@ -133,6 +139,8 @@ class StudentModel {
       parentName: parentName ?? this.parentName,
       isActive: isActive ?? this.isActive,
       guardiansJson: guardiansJson ?? this.guardiansJson,
+      studentPin: studentPin ?? this.studentPin,
+      parentPin: parentPin ?? this.parentPin,
     );
   }
 
@@ -149,6 +157,8 @@ class StudentModel {
         'parent_name': parentName,
         'is_active': isActive ? 1 : 0,
         'guardians_json': guardiansJson,
+        if (studentPin != null) 'student_pin': studentPin,
+        if (parentPin != null) 'parent_pin': parentPin,
       };
 
   factory StudentModel.fromMap(Map<String, Object?> map) => StudentModel(
@@ -164,5 +174,7 @@ class StudentModel {
         parentName: (map['parent_name'] as String?) ?? '',
         isActive: (map['is_active'] as num?)?.toInt() != 0,
         guardiansJson: map['guardians_json'] as String?,
+        studentPin: map['student_pin'] as String?,
+        parentPin: map['parent_pin'] as String?,
       );
 }

@@ -6,7 +6,7 @@ import 'package:intl/intl.dart' hide TextDirection;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import 'database/database_service.dart';
 import 'security_service.dart';

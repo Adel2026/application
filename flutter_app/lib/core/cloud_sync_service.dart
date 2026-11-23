@@ -23,10 +23,24 @@ class CloudSyncService {
   final ValueNotifier<String?> syncStatus = ValueNotifier<String?>(null);
 
   bool _isInitialized = false;
-  static const String _academyDoc = 'default';
+  bool _isProcessing = false;
+  static const String _defaultAcademyDoc = 'default';
+
+  /// جلب معرّف السنتر الفريد ديناميكياً مع دعم fallback لـ default لضمان اتصال تطبيق الطالب
+  Future<String> getAcademyDocId() async {
+    try {
+      if (_databaseService != null) {
+        final cCode = await _databaseService!.getSetting('center_code', defaultValue: '');
+        if (cCode.trim().isNotEmpty) return cCode.trim();
+      }
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null && uid.isNotEmpty) return uid;
+    } catch (_) {}
+    return _defaultAcademyDoc;
+  }
 
   DocumentReference get _academyRef =>
-      FirebaseFirestore.instance.collection('academies').doc(_academyDoc);
+      FirebaseFirestore.instance.collection('academies').doc(_defaultAcademyDoc);
 
   /// تهيئة الخدمة وربطها بمستمع التغييرات في قاعدة البيانات المحلية
   Future<void> initialize(DatabaseService database) async {
@@ -84,12 +98,20 @@ class CloudSyncService {
   }
 
   Future<void> _processPendingEvents() async {
-    if (_pendingEvents.isEmpty || _databaseService == null) return;
+    if (_pendingEvents.isEmpty || _databaseService == null || _isProcessing) return;
+    _isProcessing = true;
     final eventsToProcess = Set<DataChangeEvent>.from(_pendingEvents);
     _pendingEvents.clear();
 
     if (eventsToProcess.contains(DataChangeEvent.all)) {
-      await syncAll();
+      try {
+        await syncAll();
+      } finally {
+        _isProcessing = false;
+        if (_pendingEvents.isNotEmpty) {
+          Timer(const Duration(milliseconds: 250), () => _processPendingEvents());
+        }
+      }
       return;
     }
 
@@ -113,6 +135,9 @@ class CloudSyncService {
       if (eventsToProcess.contains(DataChangeEvent.finances)) {
         await syncFinancialClaims();
       }
+      if (eventsToProcess.contains(DataChangeEvent.reports)) {
+        await syncCertificates();
+      }
 
       await _updateSyncMeta();
       lastSyncTime.value = DateTime.now();
@@ -122,6 +147,10 @@ class CloudSyncService {
       syncStatus.value = 'تعذر الاتصال بالسحابة (محفوظ محلياً)';
     } finally {
       isSyncing.value = false;
+      _isProcessing = false;
+      if (_pendingEvents.isNotEmpty) {
+        Timer(const Duration(milliseconds: 250), () => _processPendingEvents());
+      }
     }
   }
 
@@ -142,6 +171,7 @@ class CloudSyncService {
         syncAttendance(),
         syncExams(),
         syncFinancialClaims(),
+        syncCertificates(),
       ]);
 
       await _updateSyncMeta();
@@ -160,50 +190,63 @@ class CloudSyncService {
   Future<void> syncStudents() async {
     final db = await _databaseService!.database;
     final rows = await db.query('students');
-    final batch = FirebaseFirestore.instance.batch();
     final studentsCol = _academyRef.collection('students');
     final activeIds = <String>{};
 
-    for (final row in rows) {
-      final studentId = '${row['id']}';
-      activeIds.add(studentId);
-      final cleanNum = studentId.replaceAll(RegExp(r'\D'), '');
-      final studentCode = cleanNum.isNotEmpty ? cleanNum : studentId;
-      final sPhone = (row['student_phone'] ?? row['phone'] ?? '').toString();
-      final pPhone = (row['parent_phone'] ?? '').toString();
-      final docRef = studentsCol.doc(studentId);
+    const chunkSize = 400;
+    for (int i = 0; i < rows.length; i += chunkSize) {
+      final chunk = rows.skip(i).take(chunkSize);
+      final batch = FirebaseFirestore.instance.batch();
 
-      batch.set(docRef, {
-        'id': studentId,
-        'student_code': studentCode, // كود دخول الطالب (رقم أو كود كامل)
-        'full_name': row['full_name'] ?? '',
-        'phone': sPhone,
-        'student_phone': sPhone,
-        'parent_phone': pPhone,
-        'group_id': '${row['group_id'] ?? ''}',
-        'stage': row['stage'] ?? '',
-        'grade': row['grade'] ?? '',
-        'is_active': row['is_active'] ?? 1,
-        'outstanding_amount': row['outstanding_amount'] ?? 0.0,
-        'parent_name': row['parent_name'] ?? '',
-        'guardians_json': row['guardians_json'] ?? '',
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      for (final row in chunk) {
+        final studentId = '${row['id']}';
+        activeIds.add(studentId);
+        final cleanNum = studentId.replaceAll(RegExp(r'\D'), '');
+        final studentCode = cleanNum.isNotEmpty ? cleanNum : studentId;
+        final sPhone = (row['student_phone'] ?? row['phone'] ?? '').toString();
+        final pPhone = (row['parent_phone'] ?? '').toString();
+        final docRef = studentsCol.doc(studentId);
+
+        // ضمان توفر PIN للطالب وولي الأمر
+        final sPin = (row['student_pin'] as String?)?.trim() ?? '';
+        final pPin = (row['parent_pin'] as String?)?.trim() ?? '';
+        final fallbackPin = pPhone.length >= 4
+            ? pPhone.substring(pPhone.length - 4)
+            : (sPhone.length >= 4 ? sPhone.substring(sPhone.length - 4) : '1234');
+
+        batch.set(docRef, {
+          'id': studentId,
+          'student_code': studentCode, // كود دخول الطالب (رقم أو كود كامل)
+          'full_name': row['full_name'] ?? '',
+          'phone': sPhone,
+          'student_phone': sPhone,
+          'parent_phone': pPhone,
+          'group_id': '${row['group_id'] ?? ''}',
+          'stage': row['stage'] ?? '',
+          'grade': row['grade'] ?? '',
+          'is_active': row['is_active'] ?? 1,
+          'outstanding_amount': row['outstanding_amount'] ?? 0.0,
+          'parent_name': row['parent_name'] ?? '',
+          'guardians_json': row['guardians_json'] ?? '',
+          'student_pin': sPin.isNotEmpty ? sPin : fallbackPin,
+          'parent_pin': pPin.isNotEmpty ? pPin : fallbackPin,
+          'pin_code': sPin.isNotEmpty ? sPin : fallbackPin, // توافق كامل مع تطبيق الطالب
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
     }
-    await batch.commit();
 
     // حذف وثائق الطلاب القديمة/الملغاة من السحابة لتجنب تكرار الأكواد القديمة
     try {
       final snapshot = await studentsCol.get();
-      final deleteBatch = FirebaseFirestore.instance.batch();
-      bool hasDeletes = false;
-      for (final doc in snapshot.docs) {
-        if (!activeIds.contains(doc.id)) {
+      final toDelete = snapshot.docs.where((d) => !activeIds.contains(d.id)).toList();
+      for (int i = 0; i < toDelete.length; i += chunkSize) {
+        final delChunk = toDelete.skip(i).take(chunkSize);
+        final deleteBatch = FirebaseFirestore.instance.batch();
+        for (final doc in delChunk) {
           deleteBatch.delete(doc.reference);
-          hasDeletes = true;
         }
-      }
-      if (hasDeletes) {
         await deleteBatch.commit();
       }
     } catch (e) {
@@ -241,72 +284,85 @@ class CloudSyncService {
   /// 3. مزامنة الحصص وتفاصيل الدروس
   Future<void> syncSessions() async {
     final db = await _databaseService!.database;
-    final rows = await db.query('session_logs', limit: 200, orderBy: 'id DESC');
-    final cancellations = await db.query('session_cancellations', limit: 100, orderBy: 'id DESC');
+    final rows = await db.query('session_logs', limit: 500, orderBy: 'id DESC');
+    final cancellations = await db.query('session_cancellations', limit: 200, orderBy: 'id DESC');
 
-    final batch = FirebaseFirestore.instance.batch();
     final sessionsCol = _academyRef.collection('sessions');
     final cancellationsCol = _academyRef.collection('cancellations');
+    const chunkSize = 400;
 
-    for (final row in rows) {
-      final docRef = sessionsCol.doc('${row['id']}');
-      final rawTitle = (row['lesson_title'] ?? '').toString().trim();
-      final rawContent = (row['content_covered'] ?? '').toString().trim();
-      final effTitle = rawTitle.isNotEmpty ? rawTitle : (rawContent.isNotEmpty ? rawContent : 'حصة دراسية');
+    for (int i = 0; i < rows.length; i += chunkSize) {
+      final chunk = rows.skip(i).take(chunkSize);
+      final batch = FirebaseFirestore.instance.batch();
+      for (final row in chunk) {
+        final docRef = sessionsCol.doc('${row['id']}');
+        final rawTitle = (row['lesson_title'] ?? '').toString().trim();
+        final rawContent = (row['content_covered'] ?? '').toString().trim();
+        final effTitle = rawTitle.isNotEmpty ? rawTitle : (rawContent.isNotEmpty ? rawContent : 'حصة دراسية');
 
-      batch.set(docRef, {
-        'id': row['id'],
-        'group_id': '${row['group_id'] ?? ''}',
-        'session_date': row['date'] ?? row['session_date'] ?? '',
-        'lesson_title': effTitle,
-        'content_covered': rawContent,
-        'homework_assigned': row['homework'] ?? row['homework_assigned'] ?? '',
-        'next_topic': row['next_topic'] ?? '',
-        'next_quiz': row['next_quiz'] ?? '',
-        'previous_homework_review': row['previous_homework_review'] ?? '',
-        'notes': row['notes'] ?? '',
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+        batch.set(docRef, {
+          'id': row['id'],
+          'group_id': '${row['group_id'] ?? ''}',
+          'session_date': row['date'] ?? row['session_date'] ?? '',
+          'lesson_title': effTitle,
+          'content_covered': rawContent,
+          'homework_assigned': row['homework'] ?? row['homework_assigned'] ?? '',
+          'next_topic': row['next_topic'] ?? '',
+          'next_quiz': row['next_quiz'] ?? '',
+          'previous_homework_review': row['previous_homework_review'] ?? '',
+          'notes': row['notes'] ?? '',
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
     }
 
-    for (final canc in cancellations) {
-      final docRef = cancellationsCol.doc('${canc['id']}');
-      batch.set(docRef, {
-        'id': canc['id'],
-        'group_id': '${canc['group_id'] ?? ''}',
-        'date': canc['date'] ?? '',
-        'cancelled_by': canc['cancelled_by'] ?? '',
-        'reason': canc['reason'] ?? '',
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+    for (int i = 0; i < cancellations.length; i += chunkSize) {
+      final chunk = cancellations.skip(i).take(chunkSize);
+      final batch = FirebaseFirestore.instance.batch();
+      for (final canc in chunk) {
+        final docRef = cancellationsCol.doc('${canc['id']}');
+        batch.set(docRef, {
+          'id': canc['id'],
+          'group_id': '${canc['group_id'] ?? ''}',
+          'date': canc['date'] ?? '',
+          'cancelled_by': canc['cancelled_by'] ?? '',
+          'reason': canc['reason'] ?? '',
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
     }
 
-    await batch.commit();
     debugPrint('☁️ [CloudSync] Synced ${rows.length} sessions & ${cancellations.length} cancellations.');
   }
 
   /// 4. مزامنة الحضور والغياب
   Future<void> syncAttendance() async {
     final db = await _databaseService!.database;
-    final rows = await db.query('attendance', limit: 500, orderBy: 'id DESC');
-    final batch = FirebaseFirestore.instance.batch();
+    final rows = await db.query('attendance', limit: 1000, orderBy: 'id DESC');
     final attendanceCol = _academyRef.collection('attendance');
+    const chunkSize = 400;
 
-    for (final row in rows) {
-      final docRef = attendanceCol.doc('${row['id']}');
-      final date = row['attendance_date'] ?? row['session_date'] ?? '';
-      batch.set(docRef, {
-        'id': row['id'],
-        'student_id': '${row['student_id']}',
-        'attendance_date': date,
-        'session_date': date,
-        'check_in_at': row['check_in_at'] ?? '',
-        'status': row['status'] ?? 'present',
-        'source': row['source'] ?? '',
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+    for (int i = 0; i < rows.length; i += chunkSize) {
+      final chunk = rows.skip(i).take(chunkSize);
+      final batch = FirebaseFirestore.instance.batch();
+      for (final row in chunk) {
+        final docRef = attendanceCol.doc('${row['id']}');
+        final date = row['attendance_date'] ?? row['session_date'] ?? '';
+        batch.set(docRef, {
+          'id': row['id'],
+          'student_id': '${row['student_id']}',
+          'attendance_date': date,
+          'session_date': date,
+          'check_in_at': row['check_in_at'] ?? '',
+          'status': row['status'] ?? 'present',
+          'source': row['source'] ?? '',
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
     }
-    await batch.commit();
     debugPrint('☁️ [CloudSync] Synced ${rows.length} attendance records.');
   }
 
@@ -762,35 +818,74 @@ class CloudSyncService {
   /// 6. مزامنة المطالبات والمصروفات المالية
   Future<void> syncFinancialClaims() async {
     final db = await _databaseService!.database;
-    final claims = await db.query('financial_claims', limit: 500, orderBy: 'id DESC');
-    final batch = FirebaseFirestore.instance.batch();
+    final claims = await db.query('financial_claims', limit: 1000, orderBy: 'id DESC');
     final claimsCol = _academyRef.collection('financial_claims');
+    const chunkSize = 400;
 
-    for (final claim in claims) {
-      final docRef = claimsCol.doc('${claim['id']}');
-      final amount = (claim['amount'] as num? ?? 0).toDouble();
-      final paid = (claim['paid_amount'] as num? ?? 0).toDouble();
-      final isPaid = (claim['status'] == 'paid' || (paid >= amount && amount > 0)) ? 1 : 0;
+    for (int i = 0; i < claims.length; i += chunkSize) {
+      final chunk = claims.skip(i).take(chunkSize);
+      final batch = FirebaseFirestore.instance.batch();
+      for (final claim in chunk) {
+        final docRef = claimsCol.doc('${claim['id']}');
+        final amount = (claim['amount'] as num? ?? 0).toDouble();
+        final paid = (claim['paid_amount'] as num? ?? 0).toDouble();
+        final isPaid = (claim['status'] == 'paid' || (paid >= amount && amount > 0)) ? 1 : 0;
 
-      batch.set(docRef, {
-        'id': claim['id'],
-        'claim_id': claim['claim_id'] ?? '',
-        'student_id': '${claim['student_id']}',
-        'student_name': claim['student_name'] ?? '',
-        'group_id': '${claim['group_id'] ?? ''}',
-        'group_name': claim['group_name'] ?? '',
-        'session_date': claim['session_date'] ?? '',
-        'required_amount': amount,
-        'amount': amount,
-        'paid_amount': paid,
-        'is_paid': isPaid,
-        'status': claim['status'] ?? 'active',
-        'note': claim['note'] ?? '',
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+        batch.set(docRef, {
+          'id': claim['id'],
+          'claim_id': claim['claim_id'] ?? '',
+          'student_id': '${claim['student_id']}',
+          'student_name': claim['student_name'] ?? '',
+          'group_id': '${claim['group_id'] ?? ''}',
+          'group_name': claim['group_name'] ?? '',
+          'session_date': claim['session_date'] ?? '',
+          'required_amount': amount,
+          'amount': amount,
+          'paid_amount': paid,
+          'is_paid': isPaid,
+          'status': claim['status'] ?? 'active',
+          'note': claim['note'] ?? '',
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
     }
-    await batch.commit();
     debugPrint('☁️ [CloudSync] Synced ${claims.length} financial claims.');
+  }
+
+  /// 7. مزامنة شهادات التقدير الصادرة في مجموعة فرعية certificates داخل مستند السنتر
+  Future<void> syncCertificates() async {
+    try {
+      final db = await _databaseService!.database;
+      final certs = await db.query('certificates', limit: 500, orderBy: 'issued_at DESC');
+      if (certs.isEmpty) return;
+
+      final certsCol = _academyRef.collection('certificates');
+      const chunkSize = 400;
+
+      for (int i = 0; i < certs.length; i += chunkSize) {
+        final chunk = certs.skip(i).take(chunkSize);
+        final batch = FirebaseFirestore.instance.batch();
+        for (final c in chunk) {
+          final certId = '${c['id']}';
+          final docRef = certsCol.doc(certId);
+          batch.set(docRef, {
+            'id': certId,
+            'student_id': '${c['student_id']}',
+            'student_name': c['student_name'] ?? '',
+            'exam_title': c['exam_title'] ?? '',
+            'badge_title': c['badge_title'] ?? '',
+            'score_text': c['score_text'] ?? '',
+            'issued_at': c['issued_at'] ?? '',
+            'updated_at': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+        await batch.commit();
+      }
+      debugPrint('☁️ [CloudSync] Synced ${certs.length} certificates successfully.');
+    } catch (e) {
+      debugPrint('☁️ [CloudSync] Error syncing certificates: $e');
+    }
   }
 
   /// تحديث بيانات آخر مزامنة للأكاديمية

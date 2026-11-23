@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart' as sqlcipher;
 
 import '../../models/attendance_model.dart';
@@ -750,6 +750,72 @@ class DatabaseService {
           await db.execute('ALTER TABLE students ADD COLUMN guardians_json TEXT');
         } catch (_) {}
         try {
+          await db.execute('ALTER TABLE students ADD COLUMN student_pin TEXT');
+        } catch (_) {}
+        try {
+          await db.execute('ALTER TABLE students ADD COLUMN parent_pin TEXT');
+        } catch (_) {}
+
+        // توليد تلقائي للرموز السرية للطلاب الذين لا يملكون PIN حالياً
+        try {
+          final noPinStudents = await db.query(
+            'students',
+            columns: ['id', 'student_phone', 'parent_phone', 'student_pin', 'parent_pin'],
+            where: 'student_pin IS NULL OR student_pin = "" OR parent_pin IS NULL OR parent_pin = ""',
+          );
+          final rnd = Random();
+          for (final row in noPinStudents) {
+            final sId = row['id'] as String;
+            var sPin = (row['student_pin'] as String?)?.trim() ?? '';
+            var pPin = (row['parent_pin'] as String?)?.trim() ?? '';
+
+            if (sPin.isEmpty) {
+              final sPhoneDigits = (row['student_phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
+              if (sPhoneDigits.length >= 4) {
+                sPin = sPhoneDigits.substring(sPhoneDigits.length - 4);
+              } else {
+                sPin = '${1000 + rnd.nextInt(9000)}';
+              }
+            }
+
+            if (pPin.isEmpty) {
+              final pPhoneDigits = (row['parent_phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
+              if (pPhoneDigits.length >= 4) {
+                pPin = pPhoneDigits.substring(pPhoneDigits.length - 4);
+              } else {
+                pPin = '${1000 + rnd.nextInt(9000)}';
+              }
+            }
+
+            await db.update(
+              'students',
+              {'student_pin': sPin, 'parent_pin': pPin},
+              where: 'id = ?',
+              whereArgs: [sId],
+            );
+          }
+        } catch (e) {
+          debugPrint('Error backfilling PINs: $e');
+        }
+
+        // جدول الشهادات الصادرة لمزامنتها ومتابعتها
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS certificates (
+            id TEXT PRIMARY KEY,
+            student_id TEXT NOT NULL,
+            student_name TEXT NOT NULL,
+            exam_title TEXT NOT NULL,
+            badge_title TEXT,
+            score_text TEXT,
+            issued_at TEXT NOT NULL,
+            is_synced INTEGER DEFAULT 0
+          )
+        ''');
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_cert_student ON certificates(student_id)');
+        } catch (_) {}
+
+        try {
           await db.execute('ALTER TABLE groups ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
         } catch (_) {}
 
@@ -1398,11 +1464,40 @@ class DatabaseService {
 
   Future<void> saveStudent(StudentModel student) async {
     final db = await database;
-    await db.insert(
+    final map = Map<String, dynamic>.from(student.toMap());
+
+    // ضمان وجود student_pin و parent_pin إذا لم يكونا محددين
+    if (map['student_pin'] == null || (map['student_pin'] as String).trim().isEmpty) {
+      final sPhoneDigits = student.studentPhone.replaceAll(RegExp(r'\D'), '');
+      if (sPhoneDigits.length >= 4) {
+        map['student_pin'] = sPhoneDigits.substring(sPhoneDigits.length - 4);
+      } else {
+        map['student_pin'] = '${1000 + Random().nextInt(9000)}';
+      }
+    }
+    if (map['parent_pin'] == null || (map['parent_pin'] as String).trim().isEmpty) {
+      final pPhoneDigits = student.parentPhone.replaceAll(RegExp(r'\D'), '');
+      if (pPhoneDigits.length >= 4) {
+        map['parent_pin'] = pPhoneDigits.substring(pPhoneDigits.length - 4);
+      } else {
+        map['parent_pin'] = '${1000 + Random().nextInt(9000)}';
+      }
+    }
+
+    // UPSERT آمن دون تشغيل ON DELETE CASCADE
+    final count = await db.update(
       'students',
-      student.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      map,
+      where: 'id = ?',
+      whereArgs: [student.id],
     );
+    if (count == 0) {
+      await db.insert(
+        'students',
+        map,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
     notifyChange(DataChangeEvent.students);
   }
 
@@ -1726,23 +1821,52 @@ class DatabaseService {
   Future<void> saveStudentsBatch(List<StudentModel> students) async {
     final db = await database;
     await db.transaction((txn) async {
-      final batch = txn.batch();
       for (final s in students) {
-        batch.insert(
+        final map = Map<String, dynamic>.from(s.toMap());
+        if (map['student_pin'] == null || (map['student_pin'] as String).trim().isEmpty) {
+          final sPhoneDigits = s.studentPhone.replaceAll(RegExp(r'\D'), '');
+          map['student_pin'] = sPhoneDigits.length >= 4
+              ? sPhoneDigits.substring(sPhoneDigits.length - 4)
+              : '${1000 + Random().nextInt(9000)}';
+        }
+        if (map['parent_pin'] == null || (map['parent_pin'] as String).trim().isEmpty) {
+          final pPhoneDigits = s.parentPhone.replaceAll(RegExp(r'\D'), '');
+          map['parent_pin'] = pPhoneDigits.length >= 4
+              ? pPhoneDigits.substring(pPhoneDigits.length - 4)
+              : '${1000 + Random().nextInt(9000)}';
+        }
+        final count = await txn.update(
           'students',
-          s.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
+          map,
+          where: 'id = ?',
+          whereArgs: [s.id],
         );
+        if (count == 0) {
+          await txn.insert(
+            'students',
+            map,
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+        }
       }
-      await batch.commit(noResult: true);
     });
     notifyChange(DataChangeEvent.students);
   }
 
   Future<void> deleteStudent(String id) async {
     final db = await database;
-    await db.delete('students', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await txn.delete('financial_claims', where: 'student_id = ?', whereArgs: [id]);
+      await txn.delete('attendance', where: 'student_id = ?', whereArgs: [id]);
+      await txn.delete('payments', where: 'student_id = ?', whereArgs: [id]);
+      await txn.delete('exam_scores', where: 'student_id = ?', whereArgs: [id]);
+      await txn.delete('session_cancellations', where: 'student_id = ?', whereArgs: [id]);
+      await txn.delete('certificates', where: 'student_id = ?', whereArgs: [id]);
+      await txn.delete('students', where: 'id = ?', whereArgs: [id]);
+    });
     notifyChange(DataChangeEvent.students);
+    notifyChange(DataChangeEvent.attendance);
+    notifyChange(DataChangeEvent.finances);
   }
 
   /// Deletes multiple students in a single batch transaction with cascade cleanup.
@@ -1753,6 +1877,10 @@ class DatabaseService {
     await db.transaction((txn) async {
       final placeholders = List.filled(ids.length, '?').join(',');
       // Delete from related records first
+      await txn.rawDelete(
+        'DELETE FROM financial_claims WHERE student_id IN ($placeholders)',
+        ids,
+      );
       await txn.rawDelete(
         'DELETE FROM attendance WHERE student_id IN ($placeholders)',
         ids,
@@ -1767,6 +1895,10 @@ class DatabaseService {
       );
       await txn.rawDelete(
         'DELETE FROM session_cancellations WHERE student_id IN ($placeholders)',
+        ids,
+      );
+      await txn.rawDelete(
+        'DELETE FROM certificates WHERE student_id IN ($placeholders)',
         ids,
       );
       deleted = await txn.rawDelete(
@@ -5923,5 +6055,46 @@ class DatabaseService {
   /// Set customizable footer for a message category
   Future<void> setCategoryFooter(String category, String footer) async {
     await setSetting('whatsapp_footer_$category', footer.trim());
+  }
+
+  // --- Certificates Table Helpers ---
+  Future<void> saveCertificate({
+    required String id,
+    required String studentId,
+    required String studentName,
+    required String examTitle,
+    String? badgeTitle,
+    String? scoreText,
+    String? issuedAt,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'certificates',
+      {
+        'id': id,
+        'student_id': studentId,
+        'student_name': studentName,
+        'exam_title': examTitle,
+        'badge_title': badgeTitle ?? '',
+        'score_text': scoreText ?? '',
+        'issued_at': issuedAt ?? DateTime.now().toIso8601String(),
+        'is_synced': 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    notifyChange(DataChangeEvent.reports);
+  }
+
+  Future<List<Map<String, dynamic>>> getCertificates({String? studentId}) async {
+    final db = await database;
+    if (studentId != null && studentId.isNotEmpty) {
+      return await db.query(
+        'certificates',
+        where: 'student_id = ?',
+        whereArgs: [studentId],
+        orderBy: 'issued_at DESC',
+      );
+    }
+    return await db.query('certificates', orderBy: 'issued_at DESC');
   }
 }

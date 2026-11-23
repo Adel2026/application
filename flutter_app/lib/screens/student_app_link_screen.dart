@@ -11,8 +11,11 @@ class StudentLinkItem {
   final String name;
   final String grade;
   final String groupName;
-  final String pin;
+  final String studentPin;
+  final String parentPin;
+  final String pin; // للتوافق
   final String phone;
+  final String parentPhone;
   final bool paid;
   final String quizScore;
   final String quizMax;
@@ -23,8 +26,11 @@ class StudentLinkItem {
     required this.name,
     required this.grade,
     this.groupName = '',
+    required this.studentPin,
+    required this.parentPin,
     required this.pin,
     required this.phone,
+    this.parentPhone = '',
     this.paid = true,
     this.quizScore = '20',
     this.quizMax = '20',
@@ -130,11 +136,14 @@ class _StudentAppLinkScreenState extends State<StudentAppLinkScreen> {
         final List<StudentLinkItem> loaded = [];
 
         for (final s in rawStudents) {
-          final pPhone = s.parentPhone.replaceAll(RegExp(r'\D'), '');
-          final sPhone = s.studentPhone.replaceAll(RegExp(r'\D'), '');
-          final pin = pPhone.length >= 4
-              ? pPhone.substring(pPhone.length - 4)
-              : (sPhone.length >= 4 ? sPhone.substring(sPhone.length - 4) : '1234');
+          final pPhoneDigits = s.parentPhone.replaceAll(RegExp(r'\D'), '');
+          final sPhoneDigits = s.studentPhone.replaceAll(RegExp(r'\D'), '');
+          final sPin = (s.studentPin != null && s.studentPin!.trim().isNotEmpty)
+              ? s.studentPin!.trim()
+              : (sPhoneDigits.length >= 4 ? sPhoneDigits.substring(sPhoneDigits.length - 4) : '1234');
+          final pPin = (s.parentPin != null && s.parentPin!.trim().isNotEmpty)
+              ? s.parentPin!.trim()
+              : (pPhoneDigits.length >= 4 ? pPhoneDigits.substring(pPhoneDigits.length - 4) : '1234');
 
           final gName = (s.groupId != null && groupMap.containsKey(s.groupId))
               ? groupMap[s.groupId]!
@@ -145,8 +154,11 @@ class _StudentAppLinkScreenState extends State<StudentAppLinkScreen> {
             name: s.fullName,
             grade: s.grade,
             groupName: gName,
-            pin: pin,
-            phone: s.parentPhone.isNotEmpty ? s.parentPhone : s.studentPhone,
+            studentPin: sPin,
+            parentPin: pPin,
+            pin: sPin,
+            phone: s.studentPhone.isNotEmpty ? s.studentPhone : s.parentPhone,
+            parentPhone: s.parentPhone,
             paid: s.outstandingAmount <= 0,
             quizScore: '19',
             quizMax: '20',
@@ -346,11 +358,12 @@ class _StudentAppLinkScreenState extends State<StudentAppLinkScreen> {
   /// عرض نافذة مشاركة بيانات دخول الطالب مع خيار نسخ أو إرسال واتساب مباشر
   void _showSharePinDialog(StudentLinkItem student) {
     final String shareMessage = '''مرحباً بك يا ${student.name} 🎓
-بيانات تفعيل ودخول تطبيق الطالب الخاص بـ ($centerName):
+بيانات تفعيل ودخول تطبيق الطالب وولي الأمر الخاص بـ ($centerName):
 ━━━━━━━━━━━━━━━━━
 🔹 كود السنتر: $centerCode
 🔹 كود الطالب: ${student.id}
-🔹 الرمز السري (PIN): ${student.pin}
+🔹 الرمز السري للطالب (Student PIN): ${student.studentPin}
+🔹 الرمز السري لولي الأمر (Parent PIN): ${student.parentPin}
 ━━━━━━━━━━━━━━━━━
 نتمنى لك دوام التفوق والنجاح! 🌟''';
 
@@ -445,10 +458,12 @@ class _StudentAppLinkScreenState extends State<StudentAppLinkScreen> {
     StudentLinkItem sampleStudent = _students.isNotEmpty
         ? _students.first
         : StudentLinkItem(
-            id: '48210',
-            name: 'أحمد محمود حسن',
-            grade: 'تالتة ثانوي',
-            pin: '4821',
+            id: '10001',
+            name: 'طالب تجريبي',
+            grade: 'الصف الأول الثانوي',
+            studentPin: '1234',
+            parentPin: '5678',
+            pin: '1234',
             phone: '',
             paid: true,
             quizScore: '19',
@@ -1183,21 +1198,44 @@ class _StudentAppLinkScreenState extends State<StudentAppLinkScreen> {
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                                          decoration: BoxDecoration(
-                                            color: Colors.teal.shade50,
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.teal.shade200),
-                                          ),
-                                          child: Text(
-                                            'PIN: ${st.pin}',
-                                            style: TextStyle(
-                                              color: Colors.teal.shade900,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 12,
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: Colors.blue.shade50,
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: Colors.blue.shade200),
+                                              ),
+                                              child: Text(
+                                                'طالب: ${st.studentPin}',
+                                                style: TextStyle(
+                                                  color: Colors.blue.shade900,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
                                             ),
-                                          ),
+                                            const SizedBox(height: 3),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: Colors.amber.shade50,
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: Colors.amber.shade300),
+                                              ),
+                                              child: Text(
+                                                'ولي أمر: ${st.parentPin}',
+                                                style: TextStyle(
+                                                  color: Colors.amber.shade900,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                         const SizedBox(width: 8),
                                         InkWell(
