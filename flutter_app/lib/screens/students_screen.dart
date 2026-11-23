@@ -1488,6 +1488,338 @@ class _StudentsScreenState extends State<StudentsScreen> {
     }
   }
 
+  void _showStudentCredentialsDialog(StudentModel student) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return FutureBuilder<String>(
+          future: CloudSyncService.instance.getAcademyDocId(),
+          builder: (context, centerSnap) {
+            final centerCode = centerSnap.data ?? 'default';
+            return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection('academies')
+                  .doc(centerCode)
+                  .collection('students')
+                  .doc(student.id)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                final cloudData = snapshot.data?.data() ?? {};
+                final sPhoneDigits = student.studentPhone.replaceAll(RegExp(r'\D'), '');
+                final pPhoneDigits = student.parentPhone.replaceAll(RegExp(r'\D'), '');
+
+                final studentCode = (cloudData['student_code'] ?? student.id).toString();
+                final studentPin = (student.studentPin != null && student.studentPin!.trim().isNotEmpty)
+                    ? student.studentPin!.trim()
+                    : ((cloudData['pin_code'] ?? '').toString().trim().isNotEmpty
+                        ? cloudData['pin_code'].toString().trim()
+                        : (sPhoneDigits.length >= 4 ? sPhoneDigits.substring(sPhoneDigits.length - 4) : '1234'));
+
+                final parentPin = (student.parentPin != null && student.parentPin!.trim().isNotEmpty)
+                    ? student.parentPin!.trim()
+                    : ((cloudData['parent_pin'] ?? '').toString().trim().isNotEmpty
+                        ? cloudData['parent_pin'].toString().trim()
+                        : (pPhoneDigits.length >= 4 ? pPhoneDigits.substring(pPhoneDigits.length - 4) : '1234'));
+
+                final is2FaEnabled = cloudData['require_2fa'] != false;
+                final verifiedPhone = (cloudData['two_fa_verified_phone'] ??
+                        (student.parentPhone.isNotEmpty ? student.parentPhone : student.studentPhone))
+                    .toString();
+
+                return Dialog(
+                  backgroundColor: Colors.transparent,
+                  insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: isDark
+                            ? [const Color(0xFF0F172A), const Color(0xFF1E293B)]
+                            : [Colors.white, const Color(0xFFF8FAFC)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                        color: const Color(0xFF00F2FE).withValues(alpha: 0.5),
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF00F2FE).withValues(alpha: 0.2),
+                          blurRadius: 24,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Header
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00F2FE).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(Icons.phonelink_lock_rounded, color: Color(0xFF00F2FE), size: 24),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      student.fullName,
+                                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    const Text(
+                                      'بيانات تطبيق الطالب وولي الأمر 📱',
+                                      style: TextStyle(fontSize: 11, color: Color(0xFF00F2FE), fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close_rounded, size: 20),
+                                onPressed: () => Navigator.pop(ctx),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // 1. Student Code Card
+                          _buildCredentialRow(
+                            context: context,
+                            isDark: isDark,
+                            icon: Icons.tag_rounded,
+                            iconColor: const Color(0xFF00F2FE),
+                            title: 'كود الطالب (الدخول)',
+                            value: studentCode,
+                            onCopy: () {
+                              Clipboard.setData(ClipboardData(text: studentCode));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('تم نسخ كود الطالب ($studentCode) 📋'), duration: const Duration(seconds: 1)),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 10),
+
+                          // 2. Student PIN Card
+                          _buildCredentialRow(
+                            context: context,
+                            isDark: isDark,
+                            icon: Icons.key_rounded,
+                            iconColor: const Color(0xFF10B981),
+                            title: 'الرمز السري للطالب (Student PIN)',
+                            value: studentPin,
+                            onCopy: () {
+                              Clipboard.setData(ClipboardData(text: studentPin));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('تم نسخ رمز الطالب ($studentPin) 📋'), duration: const Duration(seconds: 1)),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 10),
+
+                          // 3. Parent PIN Card
+                          _buildCredentialRow(
+                            context: context,
+                            isDark: isDark,
+                            icon: Icons.family_restroom_rounded,
+                            iconColor: const Color(0xFFF59E0B),
+                            title: 'الرمز السري لولي الأمر (Parent PIN)',
+                            value: parentPin,
+                            onCopy: () {
+                              Clipboard.setData(ClipboardData(text: parentPin));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('تم نسخ رمز ولي الأمر ($parentPin) 📋'), duration: const Duration(seconds: 1)),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 12),
+
+                          // 4. Status Card
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 9,
+                                      height: 9,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: student.isActive ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'حالة الطالب في النظام: ${student.isActive ? "نشط ومتاح 🟢" : "متوقف مؤقتاً ⏸️"}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        color: student.isActive ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      is2FaEnabled ? Icons.shield_rounded : Icons.shield_outlined,
+                                      size: 14,
+                                      color: is2FaEnabled ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        is2FaEnabled ? 'المصادقة الثنائية (2FA): مفعلة برقم $verifiedPhone' : 'المصادقة الثنائية: غير مفعلة',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Actions: Share via WhatsApp & Open Full Control
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFF25D366),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  icon: const Icon(Icons.share_rounded, size: 16, color: Colors.white),
+                                  label: const Text('إرسال واتساب', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Colors.white)),
+                                  onPressed: () {
+                                    final shareMsg = '''مرحباً بك يا ${student.fullName} 🎓
+بيانات دخولك لتطبيق السنتر:
+━━━━━━━━━━━━━━━━━
+🔹 كود السنتر: $centerCode
+🔹 كود الدخول: $studentCode
+🔑 رمز الطالب (Student PIN): $studentPin
+👨‍👩‍👧 رمز ولي الأمر (Parent PIN): $parentPin
+━━━━━━━━━━━━━━━━━
+نتمنى لك دوام التفوق والنجاح! 🌟''';
+                                    final targetPhone = student.parentPhone.isNotEmpty ? student.parentPhone : student.studentPhone;
+                                    WhatsAppService.openWhatsApp(phone: targetPhone, message: shareMsg);
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFF00F2FE),
+                                    side: const BorderSide(color: Color(0xFF00F2FE)),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  icon: const Icon(Icons.settings_suggest_rounded, size: 16),
+                                  label: const Text('لوحة التحكم', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => TeacherStudentAppControlScreen(database: widget.database),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCredentialRow({
+    required BuildContext context,
+    required bool isDark,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String value,
+    required VoidCallback onCopy,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: iconColor.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 10.5, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                ),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2,
+                    color: iconColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'نسخ',
+            icon: Icon(Icons.copy_rounded, color: iconColor, size: 18),
+            onPressed: onCopy,
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showPaymentDialog(StudentModel student) {
     final amountCtrl = TextEditingController(
       text: student.outstandingAmount > 0
@@ -2680,35 +3012,28 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                                             ),
                                                     ),
                                                   ),
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 6,
-                                                          vertical: 2,
-                                                        ),
-                                                    decoration: BoxDecoration(
-                                                      color: student.isActive
-                                                          ? Colors.green.withValues(alpha: 0.12)
-                                                          : Colors.amber.withValues(alpha: 0.15),
-                                                      borderRadius:
-                                                          BorderRadius.circular(6),
-                                                      border: Border.all(
+                                                  Tooltip(
+                                                    message: student.isActive
+                                                        ? (AppLocale.isArabic(context) ? 'نشط' : 'Active')
+                                                        : (AppLocale.isArabic(context) ? 'متوقف' : 'Paused'),
+                                                    child: Container(
+                                                      width: 9,
+                                                      height: 9,
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
                                                         color: student.isActive
-                                                            ? Colors.green.withValues(alpha: 0.4)
-                                                            : Colors.amber.shade700,
-                                                        width: 0.6,
-                                                      ),
-                                                    ),
-                                                    child: Text(
-                                                      student.isActive
-                                                          ? (AppLocale.isArabic(context) ? 'نشط 🟢' : 'Active 🟢')
-                                                          : (AppLocale.isArabic(context) ? 'متوقف ⏸️' : 'Paused ⏸️'),
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.bold,
-                                                        color: student.isActive
-                                                            ? Colors.green
-                                                            : Colors.amber.shade800,
+                                                            ? const Color(0xFF10B981)
+                                                            : const Color(0xFFF59E0B),
+                                                        boxShadow: [
+                                                          BoxShadow(
+                                                            color: (student.isActive
+                                                                    ? const Color(0xFF10B981)
+                                                                    : const Color(0xFFF59E0B))
+                                                                .withValues(alpha: 0.5),
+                                                            blurRadius: 4,
+                                                            spreadRadius: 1,
+                                                          ),
+                                                        ],
                                                       ),
                                                     ),
                                                   ),
@@ -2852,7 +3177,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                               IconButton(
                                                 style: IconButton.styleFrom(
                                                   backgroundColor: const Color(
-                                                    0xFF25D366,
+                                                    0xFF00F2FE,
                                                   ).withValues(alpha: 0.12),
                                                   shape: RoundedRectangleBorder(
                                                     borderRadius:
@@ -2865,19 +3190,13 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                                   ),
                                                 ),
                                                 icon: const Icon(
-                                                  Icons
-                                                      .chat_bubble_outline_rounded,
-                                                  color: Color(0xFF25D366),
+                                                  Icons.phonelink_lock_rounded,
+                                                  color: Color(0xFF00F2FE),
                                                   size: 19,
                                                 ),
-                                                tooltip: 'واتساب ولي الأمر',
-                                                onPressed: () {
-                                                  WhatsAppService.openWhatsApp(
-                                                    phone: student.parentPhone,
-                                                    message:
-                                                        'السلام عليكم ورحمة الله، بخصوص الطالب ${student.fullName}.',
-                                                  );
-                                                },
+                                                tooltip: 'بيانات تطبيق الطالب',
+                                                onPressed: () =>
+                                                    _showStudentCredentialsDialog(student),
                                               ),
                                               const SizedBox(height: 6),
                                               IconButton(
