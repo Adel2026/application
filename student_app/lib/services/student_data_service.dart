@@ -312,4 +312,53 @@ class StudentDataService {
         .snapshots()
         .map((snap) => snap.data() ?? {});
   }
+
+  /// بث حي لكتالوج المكافآت المتاحة
+  Stream<List<Map<String, dynamic>>> streamRewardsCatalog() {
+    return _academyRef
+        .collection('rewards')
+        .where('is_active', isEqualTo: 1)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => d.data()).toList());
+  }
+
+  /// بث حي للوحة الشرف لأوائل الطلاب بالنقاط (حسب المجموعة)
+  Stream<List<Map<String, dynamic>>> streamLeaderboard([dynamic groupId]) {
+    Query query = _academyRef.collection('students').where('is_active', isEqualTo: 1);
+    if (groupId != null && '$groupId'.isNotEmpty) {
+      query = query.where('group_id', isEqualTo: '$groupId');
+    }
+    return query
+        .orderBy('points_balance', descending: true)
+        .limit(20)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => d.data() as Map<String, dynamic>).toList());
+  }
+
+  /// تقديم طلب استبدال مكافأة من تطبيق الطالب
+  Future<String?> submitRedemptionRequest({
+    required String studentId,
+    required String studentName,
+    required String rewardId,
+    required String rewardTitle,
+    required int costPoints,
+  }) async {
+    try {
+      final rnd = DateTime.now().millisecondsSinceEpoch % 10000;
+      final voucherCode = 'GIFT-${1000 + rnd}';
+      await _academyRef.collection('redemption_requests').add({
+        'student_id': studentId,
+        'student_name': studentName,
+        'reward_id': rewardId,
+        'reward_title': rewardTitle,
+        'cost_points': costPoints,
+        'voucher_code': voucherCode,
+        'status': 'pending',
+        'created_at': FieldValue.serverTimestamp(),
+      });
+      return voucherCode;
+    } catch (e) {
+      return null;
+    }
+  }
 }

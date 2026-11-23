@@ -3387,6 +3387,30 @@ class _GroupAttendanceSheetState extends State<GroupAttendanceSheet> {
               time: nowTime,
             );
           }
+
+          // احتساب نقاط حضور الحصة في الموعد (نظام المكافآت)
+          try {
+            final rules = await widget.database.getPointsRules();
+            final attPoints = rules['attendance'] ?? 10;
+            final awarded = await widget.database.awardStudentPoints(
+              studentId: studentId,
+              delta: attPoints,
+              reason: 'حضور الحصة في الموعد',
+              uniqueKey: 'att_${studentId}_${widget.date}',
+            );
+            if (awarded && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('🎉 تم منح $studentName +$attPoints نقطة لحضور الحصة! 🪙'),
+                  backgroundColor: const Color(0xFF10B981),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('Error awarding attendance points: $e');
+          }
         }
       }
 
@@ -3474,6 +3498,33 @@ class _GroupAttendanceSheetState extends State<GroupAttendanceSheet> {
       date: widget.date,
       recitationRating: rating,
     );
+
+    // احتساب نقاط التسميع أو الكويز عند التفوق (ممتاز / 90% فأكثر)
+    if (rating.contains('ممتاز') || rating.contains('جيد جداً') || rating.contains('90%') || rating.contains('100%')) {
+      try {
+        final rules = await widget.database.getPointsRules();
+        final qzPoints = rules['quiz'] ?? 25;
+        final awarded = await widget.database.awardStudentPoints(
+          studentId: studentId,
+          delta: qzPoints,
+          reason: 'التفوق في التسميع/الاختبار ($rating)',
+          uniqueKey: 'rec_${studentId}_${widget.date}',
+        );
+        if (awarded && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('🌟 تم منح الطالب +$qzPoints نقطة لتفوقه في التسميع! 🪙'),
+              backgroundColor: const Color(0xFF00F2FE),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error awarding recitation points: $e');
+      }
+    }
+
     await _loadStudentsOnly();
   }
 
@@ -3487,6 +3538,33 @@ class _GroupAttendanceSheetState extends State<GroupAttendanceSheet> {
       date: widget.date,
       homeworkStatus: hwStatus,
     );
+
+    // احتساب نقاط إتمام الواجب المنزلي
+    if (hwStatus == 'done' || hwStatus.contains('كامل') || hwStatus.contains('تم التسليم')) {
+      try {
+        final rules = await widget.database.getPointsRules();
+        final hwPoints = rules['homework'] ?? 15;
+        final awarded = await widget.database.awardStudentPoints(
+          studentId: studentId,
+          delta: hwPoints,
+          reason: 'إتمام الواجب المنزلي',
+          uniqueKey: 'hw_${studentId}_${widget.date}',
+        );
+        if (awarded && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('📚 تم منح الطالب +$hwPoints نقطة لإتمام الواجب! 🪙'),
+              backgroundColor: const Color(0xFFF59E0B),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error awarding homework points: $e');
+      }
+    }
+
     await _loadStudentsOnly();
   }
 

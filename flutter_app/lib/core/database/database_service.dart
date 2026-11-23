@@ -819,6 +819,44 @@ class DatabaseService {
           await db.execute('CREATE INDEX IF NOT EXISTS idx_cert_student ON certificates(student_id)');
         } catch (_) {}
 
+        // نظام بنك النقاط والمكافآت التفاعلي
+        try {
+          final columns = await db.rawQuery('PRAGMA table_info(students)');
+          final hasPoints = columns.any((c) => c['name'] == 'points_balance');
+          if (!hasPoints) {
+            await db.execute('ALTER TABLE students ADD COLUMN points_balance INTEGER NOT NULL DEFAULT 0');
+          }
+        } catch (e) {
+          debugPrint('Error adding points_balance to students: $e');
+        }
+
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS rewards_catalog (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            cost_points INTEGER NOT NULL,
+            icon_name TEXT DEFAULT 'gift',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL
+          )
+        ''');
+
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS student_points_log (
+            id TEXT PRIMARY KEY,
+            student_id TEXT NOT NULL,
+            points_delta INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            voucher_code TEXT,
+            status TEXT DEFAULT 'completed',
+            created_at TEXT NOT NULL
+          )
+        ''');
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_points_log_student ON student_points_log(student_id)');
+        } catch (_) {}
+
         try {
           await db.execute('ALTER TABLE groups ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
         } catch (_) {}
@@ -6100,5 +6138,227 @@ class DatabaseService {
       );
     }
     return await db.query('certificates', orderBy: 'issued_at DESC');
+  }
+
+  // ==========================================
+  // نظام بنك النقاط والمكافآت التفاعلي
+  // ==========================================
+
+  /// جلب قواعد احتساب النقاط من الإعدادات
+  Future<Map<String, int>> getPointsRules() async {
+    final att = await getSetting('points_rule_attendance', defaultValue: '10');
+    final hw = await getSetting('points_rule_homework', defaultValue: '15');
+    final qz = await getSetting('points_rule_quiz', defaultValue: '25');
+
+    return {
+      'attendance': int.tryParse(att) ?? 10,
+      'homework': int.tryParse(hw) ?? 15,
+      'quiz': int.tryParse(qz) ?? 25,
+    };
+  }
+
+  /// حفظ قواعد احتساب النقاط
+  Future<void> savePointsRules({
+    required int attendance,
+    required int homework,
+    required int quiz,
+  }) async {
+    await setSetting('points_rule_attendance', '$attendance');
+    await setSetting('points_rule_homework', '$homework');
+    await setSetting('points_rule_quiz', '$quiz');
+    notifyChange(DataChangeEvent.settings);
+  }
+
+  /// جلب جميع المكافآت من الكتالوج (مع إضافة 3 افتراضية إذا كان فارغاً)
+  Future<List<Map<String, dynamic>>> getAllRewards() async {
+    final db = await database;
+    var rows = await db.query('rewards_catalog', orderBy: 'cost_points ASC');
+    if (rows.isEmpty) {
+      final now = DateTime.now().toIso8601String();
+      await db.insert('rewards_catalog', {
+        'id': 'reward_badge_cert',
+        'title': 'شهادة تفوق إلكترونية ذهبية 📜',
+        'description': 'شهادة تقدير رسمية موقعة تظهر في ملفك وإشعار بالواتساب',
+        'cost_points': 50,
+        'icon_name': 'card_membership',
+        'is_active': 1,
+        'updated_at': now,
+      });
+      await db.insert('rewards_catalog', {
+        'id': 'reward_discount_50',
+        'title': 'خصم 50 ج على اشتراك الشهر القادم 💵',
+        'description': 'قسيمة خصم فورية تطبق على أول مطالبة شهرية قادمة',
+        'cost_points': 150,
+        'icon_name': 'payments',
+        'is_active': 1,
+        'updated_at': now,
+      });
+      await db.insert('rewards_catalog', {
+        'id': 'reward_free_month',
+        'title': 'شهر مجاني كامل ومذكرة الشرح 🎁',
+        'description': 'إعفاء كامل من مصاريف الشهر القادم مع مذكرة المراجعة هدية',
+        'cost_points': 300,
+        'icon_name': 'stars',
+        'is_active': 1,
+        'updated_at': now,
+      });
+      rows = await db.query('rewards_catalog', orderBy: 'cost_points ASC');
+    }
+    return rows;
+  }
+
+  /// حفظ أو تحديث مكافأة في الكتالوج
+  Future<void> saveReward({
+    required String id,
+    required String title,
+    String description = '',
+    required int costPoints,
+    String iconName = 'gift',
+    int isActive = 1,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'rewards_catalog',
+      {
+        'id': id,
+        'title': title,
+        'description': description,
+        'cost_points': costPoints,
+        'icon_name': iconName,
+        'is_active': isActive,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    notifyChange(DataChangeEvent.settings);
+  }
+
+  /// حذف مكافأة من الكتالوج
+  Future<void> deleteReward(String id) async {
+    final db = await database;
+    await db.delete('rewards_catalog', where: 'id = ?', whereArgs: [id]);
+    notifyChange(DataChangeEvent.settings);
+  }
+
+  /// إضافة نقاط لطالب مع تسجيل العملية في سجل النقاط ومنع التكرار لنفس اليوم والسبب
+  Future<bool> awardStudentPoints({
+    required String studentId,
+    required int delta,
+    required String reason,
+    String? uniqueKey,
+  }) async {
+    if (delta == 0) return false;
+    final db = await database;
+
+    // فحص منع التكرار إذا تم تحديد uniqueKey أو كان اليوم ونفس السبب موجودين
+    if (uniqueKey != null && uniqueKey.isNotEmpty) {
+      final existing = await db.query(
+        'student_points_log',
+        where: 'id = ?',
+        whereArgs: [uniqueKey],
+      );
+      if (existing.isNotEmpty) return false;
+    }
+
+    final logId = uniqueKey ?? 'pt_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}';
+    final now = DateTime.now().toIso8601String();
+
+    await db.transaction((txn) async {
+      await txn.insert('student_points_log', {
+        'id': logId,
+        'student_id': studentId,
+        'points_delta': delta,
+        'reason': reason,
+        'voucher_code': null,
+        'status': 'completed',
+        'created_at': now,
+      });
+
+      await txn.rawUpdate(
+        'UPDATE students SET points_balance = MAX(0, points_balance + ?) WHERE id = ?',
+        [delta, studentId],
+      );
+    });
+
+    notifyChange(DataChangeEvent.students);
+    return true;
+  }
+
+  /// استبدال مكافأة للطالب وصرف قسيمة
+  Future<String?> redeemRewardForStudent({
+    required String studentId,
+    required String rewardId,
+  }) async {
+    final db = await database;
+
+    final rewardRes = await db.query('rewards_catalog', where: 'id = ?', whereArgs: [rewardId]);
+    if (rewardRes.isEmpty) return null;
+    final reward = rewardRes.first;
+    final cost = (reward['cost_points'] as num).toInt();
+    final rewardTitle = reward['title'] as String;
+
+    final studentRes = await db.query('students', where: 'id = ?', whereArgs: [studentId]);
+    if (studentRes.isEmpty) return null;
+    final currentPoints = (studentRes.first['points_balance'] as num?)?.toInt() ?? 0;
+
+    if (currentPoints < cost) return null; // رصيد غير كافٍ
+
+    final rnd = Random();
+    final voucherCode = 'GIFT-${1000 + rnd.nextInt(9000)}';
+    final now = DateTime.now().toIso8601String();
+    final logId = 'redeem_${DateTime.now().millisecondsSinceEpoch}_${rnd.nextInt(1000)}';
+
+    await db.transaction((txn) async {
+      await txn.rawUpdate(
+        'UPDATE students SET points_balance = points_balance - ? WHERE id = ?',
+        [cost, studentId],
+      );
+
+      await txn.insert('student_points_log', {
+        'id': logId,
+        'student_id': studentId,
+        'points_delta': -cost,
+        'reason': 'استبدال مكافأة: $rewardTitle',
+        'voucher_code': voucherCode,
+        'status': 'completed',
+        'created_at': now,
+      });
+    });
+
+    notifyChange(DataChangeEvent.students);
+    return voucherCode;
+  }
+
+  /// جلب سجل نقاط الطالب
+  Future<List<Map<String, dynamic>>> getStudentPointsLog(String studentId) async {
+    final db = await database;
+    return await db.query(
+      'student_points_log',
+      where: 'student_id = ?',
+      whereArgs: [studentId],
+      orderBy: 'created_at DESC',
+    );
+  }
+
+  /// جلب أوائل الطلاب في النقاط (لوحة الشرف)
+  Future<List<Map<String, dynamic>>> getLeaderboardStudents({int limit = 20, String? groupId}) async {
+    final db = await database;
+    if (groupId != null && groupId.isNotEmpty) {
+      return await db.query(
+        'students',
+        columns: ['id', 'full_name', 'points_balance', 'grade', 'group_id'],
+        where: 'group_id = ? AND is_active = 1',
+        whereArgs: [groupId],
+        orderBy: 'points_balance DESC',
+        limit: limit,
+      );
+    }
+    return await db.query(
+      'students',
+      columns: ['id', 'full_name', 'points_balance', 'grade', 'group_id'],
+      where: 'is_active = 1',
+      orderBy: 'points_balance DESC',
+      limit: limit,
+    );
   }
 }

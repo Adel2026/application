@@ -172,6 +172,7 @@ class CloudSyncService {
         syncExams(),
         syncFinancialClaims(),
         syncCertificates(),
+        syncRewardsCatalog(),
       ]);
 
       await _updateSyncMeta();
@@ -231,6 +232,7 @@ class CloudSyncService {
           'student_pin': sPin.isNotEmpty ? sPin : fallbackPin,
           'parent_pin': pPin.isNotEmpty ? pPin : fallbackPin,
           'pin_code': sPin.isNotEmpty ? sPin : fallbackPin, // توافق كامل مع تطبيق الطالب
+          'points_balance': row['points_balance'] ?? 0,
           'updated_at': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       }
@@ -885,6 +887,33 @@ class CloudSyncService {
       debugPrint('☁️ [CloudSync] Synced ${certs.length} certificates successfully.');
     } catch (e) {
       debugPrint('☁️ [CloudSync] Error syncing certificates: $e');
+    }
+  }
+
+  /// مزامنة كتالوج المكافآت إلى السحابة ليراها تطبيق الطالب
+  Future<void> syncRewardsCatalog() async {
+    try {
+      final db = await _databaseService!.database;
+      final rewards = await db.query('rewards_catalog');
+      final rewardsCol = _academyRef.collection('rewards');
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final r in rewards) {
+        final rId = '${r['id']}';
+        batch.set(rewardsCol.doc(rId), {
+          'id': rId,
+          'title': r['title'] ?? '',
+          'description': r['description'] ?? '',
+          'cost_points': r['cost_points'] ?? 0,
+          'icon_name': r['icon_name'] ?? 'gift',
+          'is_active': r['is_active'] ?? 1,
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
+      debugPrint('☁️ [CloudSync] Synced ${rewards.length} rewards to cloud.');
+    } catch (e) {
+      debugPrint('☁️ [CloudSync] Error syncing rewards: $e');
     }
   }
 

@@ -59,6 +59,7 @@ class StudentModel {
     this.guardiansJson,
     this.studentPin,
     this.parentPin,
+    this.pointsBalance = 0,
   });
 
   final String id;
@@ -75,6 +76,7 @@ class StudentModel {
   final String? guardiansJson;
   final String? studentPin;
   final String? parentPin;
+  final int pointsBalance;
 
   /// قائمة جميع أولياء الأمور المسجلين للطالب مع صلة القرابة لكل منهم
   List<GuardianContact> get guardians {
@@ -125,6 +127,7 @@ class StudentModel {
     String? guardiansJson,
     String? studentPin,
     String? parentPin,
+    int? pointsBalance,
   }) {
     return StudentModel(
       id: id ?? this.id,
@@ -141,6 +144,7 @@ class StudentModel {
       guardiansJson: guardiansJson ?? this.guardiansJson,
       studentPin: studentPin ?? this.studentPin,
       parentPin: parentPin ?? this.parentPin,
+      pointsBalance: pointsBalance ?? this.pointsBalance,
     );
   }
 
@@ -159,6 +163,7 @@ class StudentModel {
         'guardians_json': guardiansJson,
         if (studentPin != null) 'student_pin': studentPin,
         if (parentPin != null) 'parent_pin': parentPin,
+        'points_balance': pointsBalance,
       };
 
   factory StudentModel.fromMap(Map<String, Object?> map) => StudentModel(
@@ -176,5 +181,6 @@ class StudentModel {
         guardiansJson: map['guardians_json'] as String?,
         studentPin: map['student_pin'] as String?,
         parentPin: map['parent_pin'] as String?,
+        pointsBalance: (map['points_balance'] as num?)?.toInt() ?? 0,
       );
 }

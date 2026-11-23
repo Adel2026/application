@@ -28,6 +28,7 @@ import 'teacher_broadcast_screen.dart';
 import 'teacher_messages_hub_screen.dart';
 import 'teacher_student_app_control_screen.dart';
 import 'teacher_materials_hub_screen.dart';
+import 'rewards_manager_screen.dart';
 import '../core/academy_communication_service.dart';
 import '../core/teacher_update_service.dart';
 import '../models/group_model.dart';
@@ -3600,6 +3601,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                     onTap: () {
                       Navigator.pop(context);
                       _navigateToTab('certificates');
+                    },
+                  ),
+
+                  _buildDrawerTile(
+                    icon: Icons.stars_rounded,
+                    title: 'بنك النقاط والمكافآت 🏆',
+                    subtitle: 'تحفيز الطلاب، الكتالوج، ولوحة الشرف',
+                    color: const Color(0xFF00F2FE),
+                    isSelected: false,
+                    badge: 'جديد 🪙',
+                    badgeColor: const Color(0xFF00F2FE),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => RewardsManagerScreen(database: widget.database),
+                        ),
+                      );
                     },
                   ),
 

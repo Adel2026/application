@@ -4,6 +4,7 @@ import '../../services/student_auth_service.dart';
 import '../../services/student_data_service.dart';
 import '../../theme/app_theme.dart';
 import '../smart_pdf_viewer_screen.dart';
+import '../student_rewards_screen.dart';
 
 class DashboardTab extends StatelessWidget {
   final void Function(int tabIndex)? onNavigateTab;
@@ -96,6 +97,10 @@ class DashboardTab extends StatelessWidget {
             const SizedBox(height: 18),
           ],
 
+          // 2.5 بطاقة التحدي الذهبية (بنك النقاط والمكافآت التفاعلي)
+          _buildPointsChallengeCard(context, studentId),
+          const SizedBox(height: 18),
+
           // 3. Quick Actions Header & 4 Big Chic Rounded Cards
           const Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -140,6 +145,170 @@ class DashboardTab extends StatelessWidget {
         ],
       ),
     );
+      },
+    );
+  }
+
+  // =========================================================================
+  // 0. Golden Challenge Card (بنك النقاط والمكافآت التفاعلي)
+  // =========================================================================
+  Widget _buildPointsChallengeCard(BuildContext context, String studentId) {
+    return StreamBuilder(
+      stream: StudentDataService.instance.streamStudent(studentId),
+      builder: (context, studentSnap) {
+        final sData = studentSnap.data?.data() ?? {};
+        final points = (sData['points_balance'] as num?)?.toInt() ?? 0;
+
+        return StreamBuilder<List<Map<String, dynamic>>>(
+          stream: StudentDataService.instance.streamRewardsCatalog(),
+          builder: (context, rewardsSnap) {
+            final rewards = rewardsSnap.data ?? [];
+            int nextCost = 50;
+            String nextTitle = 'مكافأة التفوق';
+
+            if (rewards.isNotEmpty) {
+              final upcoming = rewards.where((r) => ((r['cost_points'] as num).toInt()) > points).toList();
+              if (upcoming.isNotEmpty) {
+                upcoming.sort((a, b) => ((a['cost_points'] as num).toInt()).compareTo((b['cost_points'] as num).toInt()));
+                nextCost = (upcoming.first['cost_points'] as num).toInt();
+                nextTitle = upcoming.first['title'] as String;
+              } else {
+                nextCost = (rewards.last['cost_points'] as num).toInt();
+                nextTitle = rewards.last['title'] as String;
+              }
+            }
+
+            final progress = (points / (nextCost > 0 ? nextCost : 1)).clamp(0.0, 1.0);
+            final needed = (nextCost - points) > 0 ? (nextCost - points) : 0;
+
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.5), width: 1.4),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFFD700).withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFFFD700)]),
+                        ),
+                        child: const Icon(Icons.stars_rounded, color: Colors.black, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Text(
+                                  'تحدي النقاط والمكافآت 🏆',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14.5),
+                                ),
+                                SizedBox(width: 6),
+                                Text('• مباشر', style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              needed > 0 ? 'متبقي $needed نقطة لفتح ($nextTitle)' : '🎉 رصيدك مؤهل لاستبدال مكافأة الآن!',
+                              style: const TextStyle(color: Color(0xFFFFD700), fontSize: 11, fontWeight: FontWeight.bold),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFD700).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.monetization_on_rounded, color: Color(0xFFFFD700), size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$points',
+                              style: const TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.w900, fontSize: 16),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Progress bar
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      backgroundColor: Colors.white12,
+                      valueColor: const AlwaysStoppedAnimation(Color(0xFFFFD700)),
+                      minHeight: 8,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Button to rewards store
+                  InkWell(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const StudentRewardsScreen()),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFD700).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.3)),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.storefront_rounded, color: Color(0xFFFFD700), size: 16),
+                          SizedBox(width: 8),
+                          Text(
+                            'فتح متجر المكافآت ولوحة الشرف 🎁',
+                            style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                          SizedBox(width: 4),
+                          Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFFFFD700), size: 12),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
       },
     );
   }
