@@ -48,7 +48,21 @@ class TeacherUpdateService {
       final normCurrent = normalizeBuild(currentBuild);
       final normLatest = normalizeBuild(latestBuild);
 
-      final isUpdateAvailable = (normLatest > normCurrent || latestBuild > currentBuild) && downloadUrl.isNotEmpty;
+      final versionCmp = _compareVersions(latestVersion, currentVersion);
+      bool isUpdateAvailable = false;
+      if (downloadUrl.isNotEmpty) {
+        if (versionCmp > 0) {
+          isUpdateAvailable = true;
+        } else if (versionCmp == 0) {
+          if (normLatest > normCurrent || latestBuild > currentBuild) {
+            isUpdateAvailable = true;
+          }
+        } else {
+          if (latestBuild > currentBuild) {
+            isUpdateAvailable = true;
+          }
+        }
+      }
 
       if (isUpdateAvailable && context.mounted) {
         _dialogShown = true;
@@ -72,6 +86,21 @@ class TeacherUpdateService {
     } finally {
       _isChecking = false;
     }
+  }
+
+  static int _compareVersions(String v1, String v2) {
+    if (v1.isEmpty || v2.isEmpty) return 0;
+    try {
+      final p1 = v1.replaceAll('v', '').split('.').map((e) => int.tryParse(e) ?? 0).toList();
+      final p2 = v2.replaceAll('v', '').split('.').map((e) => int.tryParse(e) ?? 0).toList();
+      for (int i = 0; i < 3; i++) {
+        final val1 = i < p1.length ? p1[i] : 0;
+        final val2 = i < p2.length ? p2[i] : 0;
+        if (val1 > val2) return 1;
+        if (val1 < val2) return -1;
+      }
+    } catch (_) {}
+    return 0;
   }
 
   /// نافذة عرض تفاصيل التحديث الجديد لتطبيق المعلم مع التحميل والتثبيت المباشر داخلياً
