@@ -84,42 +84,6 @@ class _StartupSplashScreen extends StatelessWidget {
   }
 }
 
-class DatabaseRecoveryApp extends StatelessWidget {
-  const DatabaseRecoveryApp({
-    super.key,
-    required this.database,
-    required this.themeController,
-    required this.navigatorKey,
-    required this.error,
-  });
-
-  final DatabaseService database;
-  final ThemeController themeController;
-  final GlobalKey<NavigatorState> navigatorKey;
-  final String error;
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      debugShowCheckedModeBanner: false,
-      locale: const Locale('ar'),
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: 'Cairo',
-        fontFamilyFallback: const ['Cairo', 'Segoe UI', 'sans-serif'],
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFB45309)),
-      ),
-      home: _DatabaseRecoveryScreen(
-        database: database,
-        themeController: themeController,
-        navigatorKey: navigatorKey,
-        error: error,
-      ),
-    );
-  }
-}
-
 class _DatabaseRecoveryScreen extends StatefulWidget {
   const _DatabaseRecoveryScreen({
     required this.database,
@@ -321,7 +285,7 @@ class _EduAcademyAppState extends State<EduAcademyApp> {
   void initState() {
     super.initState();
     unawaited(
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge),
     );
     _initializeServices();
   }

@@ -17,6 +17,43 @@ class AcademyCommunicationService {
   CollectionReference<Map<String, dynamic>> get _conversationsCol =>
       _academyRef.collection('conversations');
 
+  DocumentReference<Map<String, dynamic>> get _chatAssetsDoc =>
+      _academyRef.collection('settings').doc('chat_assets');
+
+  /// بث حي للإيموجي والملصقات المخصصة من السحابة
+  Stream<Map<String, dynamic>> streamChatAssets() {
+    return _chatAssetsDoc.snapshots().map((snap) => snap.data() ?? {});
+  }
+
+  /// إضافة إيموجي أو ملصق جديد من قبل المعلم
+  Future<void> addChatAsset({
+    required String type, // 'emoji' or 'sticker'
+    required String value, // emoji character or image URL
+    String category = 'عام',
+  }) async {
+    final field = type == 'sticker' ? 'custom_stickers' : 'custom_emojis';
+    await _chatAssetsDoc.set({
+      field: FieldValue.arrayUnion([
+        {
+          'value': value.trim(),
+          'category': category.trim(),
+          'created_at': DateTime.now().toIso8601String(),
+        }
+      ]),
+    }, SetOptions(merge: true));
+  }
+
+  /// حذف إيموجي أو ملصق
+  Future<void> removeChatAsset({
+    required String type,
+    required Map<String, dynamic> item,
+  }) async {
+    final field = type == 'sticker' ? 'custom_stickers' : 'custom_emojis';
+    await _chatAssetsDoc.set({
+      field: FieldValue.arrayRemove([item]),
+    }, SetOptions(merge: true));
+  }
+
   /// 📢 إرسال إشعار / تنبيه للطلاب
   Future<void> sendNotification({
     required String title,

@@ -15,6 +15,14 @@ class StudentCommunicationService {
   CollectionReference<Map<String, dynamic>> get _conversationsCol =>
       _academyRef.collection('conversations');
 
+  DocumentReference<Map<String, dynamic>> get _chatAssetsDoc =>
+      _academyRef.collection('settings').doc('chat_assets');
+
+  /// بث حي للملصقات والإيموجي المخصصة
+  Stream<Map<String, dynamic>> streamChatAssets() {
+    return _chatAssetsDoc.snapshots().map((snap) => snap.data() ?? {});
+  }
+
   static const String _keyReadNotifIds = 'read_notifications_ids_set_v2';
 
   /// الحصول على معرّفات الإشعارات المقروءة للطالب
