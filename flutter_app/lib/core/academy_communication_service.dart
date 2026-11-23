@@ -108,37 +108,55 @@ class AcademyCommunicationService {
         .map((snap) => snap.docs.map((d) => d.data()).toList());
   }
 
-  /// إرسال رسالة من المعلم للطالب
+  /// إرسال رسالة من المعلم للطالب (نص أو وسائط)
   Future<void> sendMessageFromTeacher({
     required String studentId,
     required String studentName,
     required String studentCode,
     required String text,
+    String? mediaUrl,
+    String? mediaType, // 'image', 'audio', 'file'
+    String? fileName,
   }) async {
     final cleanText = text.trim();
-    if (cleanText.isEmpty) return;
+    if (cleanText.isEmpty && (mediaUrl == null || mediaUrl.isEmpty)) return;
 
     final convRef = _conversationsCol.doc(studentId);
     final msgRef = convRef.collection('messages').doc();
 
     final batch = FirebaseFirestore.instance.batch();
 
+    final lastPreview = mediaType == 'image'
+        ? '📷 صورة'
+        : mediaType == 'audio'
+            ? '🎤 تسجيل صوتي'
+            : mediaType == 'file'
+                ? '📎 ملف: ${fileName ?? ""}'
+                : cleanText;
+
     // 1. إضافة الرسالة
-    batch.set(msgRef, {
+    final msgData = <String, dynamic>{
       'id': msgRef.id,
       'sender': 'teacher',
       'sender_name': 'المعلم',
       'text': cleanText,
       'created_at': FieldValue.serverTimestamp(),
       'is_read': false,
-    });
+    };
+    if (mediaUrl != null && mediaUrl.isNotEmpty) {
+      msgData['media_url'] = mediaUrl;
+      msgData['media_type'] = mediaType ?? 'file';
+      if (fileName != null) msgData['file_name'] = fileName;
+    }
+
+    batch.set(msgRef, msgData);
 
     // 2. تحديث رأس المحادثة
     batch.set(convRef, {
       'student_id': studentId,
       'student_name': studentName,
       'student_code': studentCode,
-      'last_message': cleanText,
+      'last_message': lastPreview,
       'last_sender': 'teacher',
       'last_message_time': FieldValue.serverTimestamp(),
       'unread_student': FieldValue.increment(1),
