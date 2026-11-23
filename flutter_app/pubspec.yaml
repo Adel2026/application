@@ -2,7 +2,7 @@ name: teacher_center
 
 description: تطبيق عربي لإدارة سنتر تعليمي ودروس خصوصية.
 publish_to: "none"
-version: 1.1.17+7007
+version: 1.1.19+7009
 
 environment:
   sdk: ">=3.9.0 <4.0.0"
